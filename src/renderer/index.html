@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'">
+<title>Antigravity Launcher</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="platform-unknown">
+<div class="grain" aria-hidden="true"></div>
+
+<div class="chassis">
+  <i class="screw s1" aria-hidden="true"></i>
+  <i class="screw s2" aria-hidden="true"></i>
+  <i class="screw s3" aria-hidden="true"></i>
+  <i class="screw s4" aria-hidden="true"></i>
+
+  <header class="rail">
+    <div class="plate">
+      <h1 class="plate-model">AGY·LAUNCHER <em>MK-1</em></h1>
+      <p class="plate-sub">PROCESS-LOCAL PROXY INJECTOR</p>
+    </div>
+    <div class="rail-right">
+      <span class="chip" id="osChip">—</span>
+      <span class="chip ghost" id="revChip">REV —</span>
+      <span class="winctl" id="winctl">
+        <button type="button" data-act="minimize" title="最小化" aria-label="最小化">–</button>
+        <button type="button" data-act="close" title="关闭" aria-label="关闭">×</button>
+      </span>
+    </div>
+  </header>
+
+  <section class="scope" aria-label="隧道连通性">
+    <div class="etiquette">TUNNEL<span class="cn">／ 隧道</span></div>
+    <div class="tunnel">
+      <div class="node" id="nodeLocal" data-state="idle">
+        <span class="node-main">LOCAL</span>
+        <span class="node-sub">127.0.0.1</span>
+      </div>
+      <div class="wire"><i class="pulse p1"></i><i class="pulse p2"></i></div>
+      <div class="node" id="nodeProxy" data-state="idle">
+        <span class="node-main" id="proxyReadout">:—</span>
+        <span class="node-sub" id="proxyKindReadout">未探测</span>
+      </div>
+      <div class="wire"><i class="pulse p3"></i><i class="pulse p4"></i></div>
+      <div class="lanes">
+        <div class="lane" id="laneLogin" data-state="idle">
+          <span class="lane-tag">LOGIN</span>
+          <span class="lane-host">accounts.google.com</span>
+        </div>
+        <div class="lane" id="laneModel" data-state="idle">
+          <span class="lane-tag">MODELS</span>
+          <span class="lane-host">daily-cloudcode-pa</span>
+        </div>
+      </div>
+    </div>
+    <p class="hint-mac" id="hintMac">macOS 首次打开若被拦截：右键图标 → 打开；或终端执行 <code>xattr -d com.apple.quarantine</code> 后重试。本工具未做签名与公证。</p>
+  </section>
+
+  <main class="channels">
+    <div class="etiquette">CHANNELS<span class="cn">／ 通道</span></div>
+
+    <article class="channel" id="ch01" data-state="idle">
+      <div class="ch-id"><b>CH01</b><span>PROXY<br>ENDPOINT</span></div>
+      <i class="lamp" aria-hidden="true"></i>
+      <div class="ch-body">
+        <div class="ch-value mono" id="ch01Value">尚未探测</div>
+        <div class="ch-meta mono" id="ch01Meta">自动读取系统代理 → 逐个端口做 CONNECT / SOCKS5 握手</div>
+      </div>
+      <div class="ch-acts">
+        <button type="button" class="btn" id="btnRetarget">重新探测</button>
+        <button type="button" class="btn ghost" id="btnProxyManual">手动指定</button>
+      </div>
+      <div class="ch-form" id="proxyForm" hidden>
+        <input class="input mono" id="proxyInput" type="text" placeholder="http://127.0.0.1:10808 或 socks5://127.0.0.1:7891" spellcheck="false">
+        <button type="button" class="btn" id="proxyApply">写入</button>
+        <button type="button" class="btn ghost" id="proxyClear">清除</button>
+      </div>
+    </article>
+
+    <article class="channel" id="ch02" data-state="idle">
+      <div class="ch-id"><b>CH02</b><span>ANTIGRAVITY<br>BINARY</span></div>
+      <i class="lamp" aria-hidden="true"></i>
+      <div class="ch-body">
+        <div class="ch-value mono" id="ch02Value">尚未探测</div>
+        <div class="ch-meta mono" id="ch02Meta">扫描常见安装目录，并用 resources/bin/language_server 二次确认</div>
+      </div>
+      <div class="ch-acts">
+        <button type="button" class="btn ghost" id="btnChoose">手动选择</button>
+      </div>
+    </article>
+
+    <article class="channel" id="ch03" data-state="idle">
+      <div class="ch-id"><b>CH03</b><span>PROCESS<br>TREE</span></div>
+      <i class="lamp" aria-hidden="true"></i>
+      <div class="ch-body">
+        <div class="ch-value mono" id="ch03Value">尚未探测</div>
+        <div class="ch-meta mono" id="ch03Meta">环境变量只在进程创建时继承，残留实例必须先退干净</div>
+      </div>
+      <div class="ch-acts">
+        <button type="button" class="btn danger" id="btnKill" hidden>终止残留实例</button>
+      </div>
+    </article>
+  </main>
+
+  <section class="envmap" aria-label="注入变量预览">
+    <div class="etiquette">INJECTION MAP<span class="cn">／ 将写入子进程环境</span></div>
+    <div class="env-grid" id="envGrid"></div>
+    <p class="env-note">Go 的 <code>net/http</code> 完全不读 <code>ALL_PROXY</code>，也读不到 Windows 注册表代理；<em>所以 HTTP(S)_PROXY 才是 language_server 唯一认的那一组，大小写各写一份是因为部分库只认小写。</em></p>
+  </section>
+
+  <button type="button" class="launchbar" id="launchBar" data-state="idle">
+    <span class="lb-key" id="lbKey">READY</span>
+    <span class="lb-cn" id="lbCn">探测通道</span>
+    <span class="lb-target mono" id="lbTarget">按 Enter 或点击开始</span>
+    <i class="lb-sweep" aria-hidden="true"></i>
+  </button>
+
+  <aside class="console" aria-label="日志">
+    <div class="etiquette">CONSOLE<span class="cn">／ 日志</span></div>
+    <div class="console-body mono" id="consoleBody"></div>
+    <div class="console-foot mono">
+      <span>仅向 Antigravity 进程树注入代理</span>
+      <span>不开 TUN · 不改系统代理</span>
+    </div>
+  </aside>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

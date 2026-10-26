@@ -1,0 +1,27 @@
+{
+  "name": "antigravity-launcher",
+  "version": "1.0.0",
+  "description": "Cross-platform process-local proxy launcher for Google Antigravity",
+  "main": "src/main.js",
+  "author": "peroperoyui",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win --x64",
+    "dist:linux": "electron-builder --linux AppImage deb",
+    "dist:mac": "electron-builder --mac"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "dev.peroperoyui.antigravitylauncher",
+    "productName": "Antigravity Launcher",
+    "files": ["src/**/*", "package.json"],
+    "directories": { "output": "dist" },
+    "win": { "target": ["nsis", "portable"], "artifactName": "${productName}-${version}-win-${arch}.${ext}" },
+    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.developer-tools", "hardenedRuntime": false },
+    "linux": { "target": ["AppImage", "deb"], "category": "Development", "artifactName": "${productName}-${version}-linux-${arch}.${ext}" }
+  }
+}
