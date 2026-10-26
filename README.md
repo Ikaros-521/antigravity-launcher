@@ -46,12 +46,18 @@ Antigravity 不是一整个进程。真正发请求的是 `resources/bin/languag
 
 ## 使用
 
+到 [Releases](https://github.com/Ikaros-521/antigravity-launcher/releases) 下载对应平台的安装包，装好直接运行即可，不需要装 Node。
+
+打开后自动完成探测，三条通道全绿即可点底部启动条。代理端口非典型时用「手动指定」填 `http://127.0.0.1:12345` 或 `socks5://127.0.0.1:12345`。
+
+macOS 首次打开需要手动放行一次，见 [Gatekeeper](#macos-放行--gatekeeper)。
+
+想跑源码：
+
 ```bash
 npm install
 npm start
 ```
-
-打开后自动完成探测，三条通道全绿即可点底部启动条。代理端口非典型时用「手动指定」填 `http://127.0.0.1:12345` 或 `socks5://127.0.0.1:12345`。
 
 ## 界面
 
@@ -76,7 +82,7 @@ npm run dist:mac      # dmg + zip
 
 **mac 包必须在 macOS 上打。** Electron 不支持跨平台产出 mac 产物，所以由 CI 的 macos runner 负责。
 
-图标：`build/icon.ico`（16–256 多尺寸，PNG 压缩条目）、`build/icon.png`（1024，圆角外透明）、`build/icon_<size>.png` 各尺寸。改动源图后重新生成：
+图标：`build/icon.ico`（16–256 多尺寸，未压缩 32bpp DIB 条目——`makensis` 不接受 PNG 压缩条目）、`build/icon.png`（1024，圆角外透明）、`build/icon_<size>.png` 各尺寸，源图在 `build/source/icon-source.png`。改动源图后重新生成：
 
 ```bash
 npm run icons
