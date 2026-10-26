@@ -14,6 +14,7 @@
   <header class="rail">
     <div class="plate">
       <h1 class="plate-model">AGY·LAUNCHER <em>MK-1</em></h1>
+      <p class="plate-cn" id="plateCn">反重力代理启动器</p>
       <p class="plate-sub" data-i18n="subtitle">进程级代理注入器</p>
     </div>
     <div class="rail-right">
@@ -29,8 +30,10 @@
         <button type="button" data-theme="dark" title="深色" aria-label="深色">☾</button>
       </div>
       <span class="winctl" id="winctl">
-        <button type="button" data-act="minimize" title="最小化" aria-label="最小化">–</button>
-        <button type="button" data-act="close" title="关闭" aria-label="关闭">×</button>
+        <button type="button" data-act="minimize" data-i18n-title="win.min" aria-label="minimize">–</button>
+        <button type="button" data-act="maximize" id="btnMax" data-i18n-title="win.max" aria-label="maximize">▢</button>
+        <button type="button" data-act="fullscreen" id="btnFull" data-i18n-title="win.full" aria-label="fullscreen">⤢</button>
+        <button type="button" data-act="close" data-i18n-title="win.close" aria-label="close">×</button>
       </span>
     </div>
   </header>
@@ -127,6 +130,7 @@
     <div class="console-foot mono">
       <span data-i18n="foot1">仅向 Antigravity 进程树注入代理</span>
       <span data-i18n="foot2">不开 TUN · 不改系统代理</span>
+      <span class="foot-keys" data-i18n="footKeys">F11 全屏 · 双击标题栏最大化</span>
     </div>
   </aside>
 </div>

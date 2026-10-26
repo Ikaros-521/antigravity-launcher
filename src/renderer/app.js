@@ -16,7 +16,10 @@ const els = {
   proxyApply: $('proxyApply'), proxyClear: $('proxyClear'),
   launchBar: $('launchBar'), lbKey: $('lbKey'), lbCn: $('lbCn'), lbTarget: $('lbTarget'),
   consoleBody: $('consoleBody'), envGrid: $('envGrid'),
+  plateCn: $('plateCn'), btnMax: $('btnMax'), btnFull: $('btnFull'),
 };
+
+let appName = { en: 'Antigravity Launcher', zh: '反重力代理启动器' };
 
 /* Single source of truth so a language switch can repaint everything. */
 const state = {
@@ -74,6 +77,20 @@ function trackSpotlight(e) {
   if (rafId === null) rafId = requestAnimationFrame(flushSpotlight);
 }
 for (const el of document.querySelectorAll('.glass')) el.addEventListener('pointermove', trackSpotlight);
+
+/* --- window chrome -------------------------------------------------------- */
+
+let winFlags = { maximized: false, fullscreen: false };
+function applyWinState(s) {
+  winFlags = { maximized: !!s.maximized, fullscreen: !!s.fullscreen };
+  els.btnMax.textContent = winFlags.maximized ? '❏' : '▢';
+  els.btnMax.title = t(winFlags.maximized ? 'win.restore' : 'win.max');
+  els.btnFull.textContent = winFlags.fullscreen ? '⤡' : '⤢';
+  els.btnFull.title = t(winFlags.fullscreen ? 'win.unfull' : 'win.full');
+  els.btnFull.classList.toggle('on', winFlags.fullscreen);
+  els.btnMax.classList.toggle('on', winFlags.maximized);
+}
+window.launcher.onWinState(applyWinState);
 
 /* --- cost control while hidden -------------------------------------------- */
 
@@ -239,6 +256,7 @@ function renderEnv() {
 
 function repaint() {
   renderTunnel(); renderProxy(); renderTarget(); renderRunning(); renderBar(); renderEnv();
+  applyWinState(winFlags);
   repaintLogs();
 }
 
@@ -352,7 +370,11 @@ document.querySelectorAll('.winctl button').forEach(b =>
   applyTheme(localStorage.getItem(THEME_KEY) || 'auto');
   applyLang(window.I18N.lang);
   const info = await window.launcher.boot();
+  appName = info.name || appName;
   document.body.className = `platform-${info.platform} lang-${window.I18N.lang}`;
+  els.plateCn.textContent = appName.zh;
+  document.title = `${appName.en} · ${appName.zh}`;
+  applyWinState(info.state || winFlags);
   els.osChip.textContent = OS_LABEL[info.platform] || info.platform.toUpperCase();
   els.revChip.textContent = `REV ${info.appVersion}`;
   if (info.config.proxyUrl) els.proxyInput.value = info.config.proxyUrl;

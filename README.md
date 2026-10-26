@@ -1,8 +1,23 @@
-# Antigravity Launcher
+# Antigravity Launcher · 反重力代理启动器
 
 给 Google Antigravity 桌面客户端用的**进程级代理启动器**。它不接管整机网络，只在启动 Antigravity 的那一刻把代理信息塞进它的进程树。
 
+A process-local proxy launcher for the Google Antigravity desktop client. It gives Antigravity and its child processes their own proxy environment instead of putting the whole machine behind TUN.
+
 支持 Windows / macOS / Linux。不开 TUN，不改系统代理，不需要管理员权限。
+
+## 下载 / Download
+
+**安装包请到 [Releases](https://github.com/Ikaros-521/antigravity-launcher/releases) 页面下载**，每次打 tag 由 GitHub Actions 自动构建并上传三平台产物：
+
+| 平台 | 文件 | 说明 |
+|---|---|---|
+| Windows | `*-Setup-*-win-x64.exe` | NSIS 安装器，可选安装目录 |
+| Windows | `*-win-x64.exe`（portable） | 免安装单文件 |
+| macOS | `*-mac-arm64.dmg` / `*-mac-x64.dmg` | Apple Silicon 与 Intel，另有同名 `.zip` |
+| Linux | `*-linux-x64.AppImage` / `.deb` | 含 arm64 版本 |
+
+Please download installers from the Releases page. macOS builds are **not signed or notarised** — see [macOS 放行](#macos-放行--gatekeeper).
 
 ## 为什么需要它
 
@@ -42,11 +57,16 @@ npm start
 
 - **主题** — 自动（跟随系统）/ 浅色 / 深色三态，右上角切换，默认自动。
 - **语言** — 中 / EN 切换，默认中文。日志按 key 存储，切换语言时历史日志会一并重译，不会留下中英混杂。
+- **窗口** — 无边框自绘标题栏。顶部可拖拽移动，四边与四角可拉伸，右上角提供最小化 / 最大化还原 / 全屏 / 关闭；`F11` 切全屏，双击标题栏最大化。macOS 保留系统红绿灯按钮。
 - **开销** — 窗口最小化或隐藏时暂停全部动画（环境光斑、隧道脉冲、扫光、状态灯呼吸）并停止聚光灯跟踪；恢复可见即继续。
 
 两项偏好都存在本地，不影响 Antigravity 本身。
 
 ## 打包
+
+日常使用不需要本地打包，直接去 [Releases](https://github.com/Ikaros-521/antigravity-launcher/releases) 拿安装包。推 `v*` 标签会触发 `.github/workflows/release.yml`，在三个 runner 上分别构建并汇总成一个 Release。
+
+自己构建：
 
 ```bash
 npm run dist:win      # NSIS + portable
@@ -54,9 +74,15 @@ npm run dist:linux    # AppImage + deb
 npm run dist:mac      # dmg + zip
 ```
 
-**mac 包必须在 macOS 上打。** Electron 不支持跨平台产出 mac 产物，需要真机或 CI runner。
+**mac 包必须在 macOS 上打。** Electron 不支持跨平台产出 mac 产物，所以由 CI 的 macos runner 负责。
 
-### macOS 放行说明
+图标：`build/icon.ico`（16–256 多尺寸，PNG 压缩条目）、`build/icon.png`（1024，圆角外透明）、`build/icon_<size>.png` 各尺寸。改动源图后重新生成：
+
+```bash
+npm run icons
+```
+
+### macOS 放行 · Gatekeeper
 
 本项目未做代码签名与公证，接收方首次打开会被 Gatekeeper 拦住。三种处理方式：
 

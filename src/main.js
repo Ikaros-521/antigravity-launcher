@@ -8,10 +8,19 @@ const launch = require('./core/launch');
 let win = null;
 let cfg = null;
 
+const APP_NAME = { en: 'Antigravity Launcher', zh: '反重力代理启动器' };
+
 const emit = (channel, payload) => { if (win && !win.isDestroyed()) win.webContents.send(channel, payload); };
 // Logs travel as {k, p} so the renderer can translate them — and re-translate
 // them if the language changes after they were written.
 const log = (level, k, p) => emit('log', { level, k, p, ts: Date.now() });
+
+const winState = () => ({
+  maximized: win.isMaximized(),
+  fullscreen: win.isFullScreen(),
+  minimized: win.isMinimized(),
+  visible: !win.isMinimized() && win.isVisible() && !win.isDestroyed(),
+});
 
 function createWindow() {
   const isMac = process.platform === 'darwin';
@@ -22,7 +31,11 @@ function createWindow() {
     minHeight: 620,
     show: false,
     backgroundColor: '#0a0c0d',
-    title: 'Antigravity Launcher',
+    icon: path.join(__dirname, '..', 'build', 'icon.png'),
+    title: `${APP_NAME.en} · ${APP_NAME.zh}`,
+    resizable: true,
+    maximizable: true,
+    fullscreenable: true,
     ...(isMac
       ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 20, y: 20 } }
       : { frame: false }),
@@ -36,14 +49,24 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.once('ready-to-show', () => win.show());
 
-  const pushVisible = () => emit('visibility', { visible: !win.isMinimized() && win.isVisible() && !win.isDestroyed() });
+  const pushState = () => emit('win-state', winState());
+  const pushVisible = () => emit('visibility', winState());
   for (const ev of ['minimize', 'restore', 'show', 'hide', 'focus', 'blur']) win.on(ev, pushVisible);
+  for (const ev of ['maximize', 'unmaximize', 'enter-full-screen', 'leave-full-screen']) win.on(ev, pushState);
+
+  // F11 toggles fullscreen; the menu bar is absent so nothing else claims it.
+  win.webContents.on('before-input-event', (e, input) => {
+    if (input.type !== 'keyDown') return;
+    if (input.key === 'F11') { e.preventDefault(); win.setFullScreen(!win.isFullScreen()); }
+  });
 }
 
 ipcMain.handle('boot', () => ({
   platform: process.platform,
   appVersion: app.getVersion(),
   config: cfg.data,
+  name: APP_NAME,
+  state: win ? winState() : { maximized: false, fullscreen: false, minimized: false, visible: true },
 }));
 
 ipcMain.handle('probe', async () => {
@@ -129,7 +152,11 @@ ipcMain.handle('open-external', (e, url) => {
 ipcMain.on('win', (e, action) => {
   if (!win) return;
   if (action === 'minimize') win.minimize();
-  if (action === 'close') win.close();
+  else if (action === 'close') win.close();
+  else if (action === 'maximize') {
+    if (win.isMaximized()) win.unmaximize(); else win.maximize();
+  }
+  else if (action === 'fullscreen') win.setFullScreen(!win.isFullScreen());
 });
 
 app.whenReady().then(() => {

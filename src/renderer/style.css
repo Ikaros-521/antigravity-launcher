@@ -114,7 +114,8 @@ body {
 }
 .plate-model { font-size: 22px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; line-height: 1; }
 .plate-model em { font-style: normal; color: var(--amber); letter-spacing: .08em; }
-.plate-sub { margin-top: 6px; font-size: 9.5px; letter-spacing: .3em; text-transform: uppercase; color: var(--ink-faint); }
+.plate-cn { margin-top: 7px; font-size: 12px; letter-spacing: .22em; color: var(--ink-dim); }
+.plate-sub { margin-top: 5px; font-size: 9.5px; letter-spacing: .3em; text-transform: uppercase; color: var(--ink-faint); }
 .rail-right { display: flex; align-items: center; gap: 8px; -webkit-app-region: no-drag; }
 .chip {
   font-size: 9.5px; letter-spacing: .18em; text-transform: uppercase; color: var(--ink-dim);
@@ -134,6 +135,8 @@ body {
   background: var(--inset); color: var(--ink-dim); font: 12px var(--font-mono); cursor: pointer; transition: .18s;
 }
 .winctl button:hover { color: var(--amber); border-color: var(--amber); }
+.winctl button.on { color: var(--amber); border-color: var(--amber); background: var(--amber-soft); }
+.foot-keys { color: var(--ink-faint); opacity: .8; }
 body.platform-darwin .winctl { display: none; }
 
 /* etiquette ---------------------------------------------------------------- */

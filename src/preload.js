@@ -18,4 +18,5 @@ contextBridge.exposeInMainWorld('launcher', {
   onLog: fn => on('log', fn),
   onCandidate: fn => on('probe:candidate', fn),
   onVisibility: fn => on('visibility', fn),
+  onWinState: fn => on('win-state', fn),
 });

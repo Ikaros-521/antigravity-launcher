@@ -7,6 +7,8 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
+    "icons": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/make-icon.ps1 && node tools/make-ico.js",
+    "dist": "electron-builder",
     "dist:win": "electron-builder --win --x64",
     "dist:linux": "electron-builder --linux AppImage deb",
     "dist:mac": "electron-builder --mac"
@@ -18,10 +20,40 @@
   "build": {
     "appId": "dev.peroperoyui.antigravitylauncher",
     "productName": "Antigravity Launcher",
+    "copyright": "MIT",
     "files": ["src/**/*", "package.json"],
-    "directories": { "output": "dist" },
-    "win": { "target": ["nsis", "portable"], "artifactName": "${productName}-${version}-win-${arch}.${ext}" },
-    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.developer-tools", "hardenedRuntime": false },
-    "linux": { "target": ["AppImage", "deb"], "category": "Development", "artifactName": "${productName}-${version}-linux-${arch}.${ext}" }
+    "directories": { "output": "dist", "buildResources": "build" },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [{ "target": "nsis", "arch": ["x64"] }, { "target": "portable", "arch": ["x64"] }],
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "反重力代理启动器",
+      "artifactName": "${productName}-Setup-${version}-win-${arch}.${ext}"
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "target": [{ "target": "dmg", "arch": ["arm64", "x64"] }, { "target": "zip", "arch": ["arm64", "x64"] }],
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": false,
+      "identity": null,
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}"
+    },
+    "linux": {
+      "icon": "build",
+      "target": [{ "target": "AppImage", "arch": ["x64", "arm64"] }, { "target": "deb", "arch": ["x64", "arm64"] }],
+      "category": "Development",
+      "artifactName": "${productName}-${version}-linux-${arch}.${ext}",
+      "desktop": {
+        "Name": "Antigravity Launcher",
+        "GenericName": "反重力代理启动器",
+        "Comment": "Process-local proxy launcher for Google Antigravity",
+        "StartupWMClass": "antigravity-launcher"
+      }
+    }
   }
 }
