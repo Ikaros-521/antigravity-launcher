@@ -1,8 +1,15 @@
 const net = require('net');
+const http = require('http');
 const { spawnSync } = require('child_process');
 
 const LOGIN_TARGET = { host: 'accounts.google.com', port: 443 };
 const MODEL_TARGET = { host: 'daily-cloudcode-pa.googleapis.com', port: 443 };
+
+const PING_TARGETS = [
+  { host: 'accounts.google.com', port: 443, id: 'google', label: 'Google' },
+  { host: 'github.com', port: 443, id: 'github', label: 'GitHub' },
+  { host: '1.1.1.1', port: 443, id: 'cloudflare', label: 'Cloudflare' },
+];
 
 const DEFAULT_CANDIDATES = [
   { port: 10808, label: 'v2rayN mixed' },
@@ -35,11 +42,15 @@ function parseProxyUrl(input, fallbackScheme) {
 
 // --- probes -----------------------------------------------------------------
 
-function httpConnect(ep, target, timeout) {
+function httpConnect(ep, target, timeout = 3500) {
+  const t0 = Date.now();
   return new Promise(resolve => {
     const sock = net.connect({ host: ep.host, port: ep.port, timeout });
     let buf = '';
-    const done = ok => { sock.destroy(); resolve(ok); };
+    const done = ok => {
+      sock.destroy();
+      resolve({ ...ok, rtt: Date.now() - t0 });
+    };
     sock.on('error', () => done({ ok: false, reason: 'socket error' }));
     sock.on('timeout', () => done({ ok: false, reason: 'timeout' }));
     sock.on('data', chunk => {
@@ -56,11 +67,16 @@ function httpConnect(ep, target, timeout) {
 }
 
 // Sends the domain, not a resolved IP: local DNS is exactly what is poisoned here.
-function socks5Connect(ep, target, timeout) {
+function socks5Connect(ep, target, timeout = 3500) {
+  const t0 = Date.now();
   return new Promise(resolve => {
     const sock = net.connect({ host: ep.host, port: ep.port, timeout });
-    sock.on('error', () => resolve({ ok: false, reason: 'socket error' }));
-    sock.on('timeout', () => resolve({ ok: false, reason: 'timeout' }));
+    const done = ok => {
+      sock.destroy();
+      resolve({ ...ok, rtt: Date.now() - t0 });
+    };
+    sock.on('error', () => done({ ok: false, reason: 'socket error' }));
+    sock.on('timeout', () => done({ ok: false, reason: 'timeout' }));
     const greeting = Buffer.from([0x05, 0x01, 0x00]);
     const hostBuf = Buffer.from(target.host, 'utf8');
     const req = Buffer.concat([
@@ -76,8 +92,7 @@ function socks5Connect(ep, target, timeout) {
         if (acc.length < 2) return;
         if (acc[0] !== 0x05 || acc[1] !== 0x00) {
           const isHttpReply = acc[0] === 0x48 /* H */;
-          sock.destroy();
-          return resolve({
+          return done({
             ok: false,
             reason: isHttpReply ? 'answered HTTP, not SOCKS5' : `SOCKS5 greeting rejected (05 ${acc[1]})`,
           });
@@ -86,8 +101,7 @@ function socks5Connect(ep, target, timeout) {
       }
       if (acc.length < 4) return;
       const rep = acc[1];
-      sock.destroy();
-      resolve(rep === 0x00
+      done(rep === 0x00
         ? { ok: true, reason: 'SOCKS5 CONNECT 00' }
         : { ok: false, reason: `SOCKS5 reply code ${rep}` });
     });
@@ -224,4 +238,135 @@ async function scan(manual, onEach) {
   return { results, best: usable.sort((a, b) => (b.modelOk - a.modelOk))[0] || null };
 }
 
-module.exports = { scan, classify, buildCandidates, parseProxyUrl, LOGIN_TARGET, MODEL_TARGET, DEFAULT_CANDIDATES };
+// --- ping & latency diagnostics ---------------------------------------------
+
+async function pingTargets(ep, timeout = 3500) {
+  if (!ep) {
+    return Promise.all(PING_TARGETS.map(target => new Promise(resolve => {
+      const t0 = Date.now();
+      const sock = net.connect({ host: target.host, port: target.port, timeout });
+      sock.on('connect', () => { sock.destroy(); resolve({ ...target, ok: true, rtt: Date.now() - t0 }); });
+      sock.on('error', err => { sock.destroy(); resolve({ ...target, ok: false, reason: err.code || 'error', rtt: Date.now() - t0 }); });
+      sock.on('timeout', () => { sock.destroy(); resolve({ ...target, ok: false, reason: 'timeout', rtt: timeout }); });
+    })));
+  }
+
+  const connectFn = ep.kind === 'socks5' ? socks5Connect : httpConnect;
+  return Promise.all(PING_TARGETS.map(async target => {
+    const res = await connectFn(ep, target, timeout);
+    return {
+      ...target,
+      ok: res.ok,
+      rtt: res.rtt,
+      reason: res.reason,
+    };
+  }));
+}
+
+// --- IP queries -------------------------------------------------------------
+
+function queryJsonOverHttp(options, timeout = 4000) {
+  return new Promise(resolve => {
+    const req = http.get(options, res => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          resolve({ ok: true, data: json });
+        } catch {
+          resolve({ ok: false, reason: 'parse error' });
+        }
+      });
+    });
+    req.on('error', err => resolve({ ok: false, reason: err.message }));
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, reason: 'timeout' }); });
+    req.setTimeout(timeout);
+  });
+}
+
+async function fetchIpInfo(ep) {
+  const directPromise = queryJsonOverHttp('http://ip-api.com/json?fields=status,message,country,countryCode,city,query');
+
+  let proxyPromise = Promise.resolve(null);
+  if (ep) {
+    if (ep.kind === 'socks5') {
+      proxyPromise = new Promise(resolve => {
+        const sock = net.connect({ host: ep.host, port: ep.port, timeout: 4000 });
+        let resolved = false;
+        const done = r => { if (!resolved) { resolved = true; sock.destroy(); resolve(r); } };
+        sock.on('error', err => done({ ok: false, reason: err.message }));
+        sock.on('timeout', () => done({ ok: false, reason: 'timeout' }));
+
+        const greeting = Buffer.from([0x05, 0x01, 0x00]);
+        const hostBuf = Buffer.from('ip-api.com', 'utf8');
+        const req = Buffer.concat([
+          Buffer.from([0x05, 0x01, 0x00, 0x03, hostBuf.length]),
+          hostBuf,
+          Buffer.from([(80 >> 8) & 0xff, 80 & 0xff]),
+        ]);
+
+        let phase = 0;
+        let acc = Buffer.alloc(0);
+        let httpBuf = '';
+
+        sock.on('data', chunk => {
+          if (phase === 0) {
+            acc = Buffer.concat([acc, chunk]);
+            if (acc.length < 2) return;
+            if (acc[0] !== 0x05 || acc[1] !== 0x00) return done({ ok: false, reason: 'socks greeting reject' });
+            phase = 1; acc = Buffer.alloc(0); sock.write(req); return;
+          }
+          if (phase === 1) {
+            acc = Buffer.concat([acc, chunk]);
+            if (acc.length < 4) return;
+            if (acc[1] !== 0x00) return done({ ok: false, reason: `socks connect fail: ${acc[1]}` });
+            phase = 2;
+            sock.write('GET /json?fields=status,message,country,countryCode,city,query HTTP/1.1\r\nHost: ip-api.com\r\nConnection: close\r\n\r\n');
+            return;
+          }
+          httpBuf += chunk.toString('utf8');
+          const bodyIndex = httpBuf.indexOf('\r\n\r\n');
+          if (bodyIndex !== -1) {
+            const body = httpBuf.slice(bodyIndex + 4);
+            try {
+              const json = JSON.parse(body);
+              done({ ok: true, data: json });
+            } catch { /* wait for more */ }
+          }
+        });
+        sock.write(greeting);
+      });
+    } else {
+      proxyPromise = queryJsonOverHttp({
+        host: ep.host,
+        port: ep.port,
+        path: 'http://ip-api.com/json?fields=status,message,country,countryCode,city,query',
+        headers: { Host: 'ip-api.com' },
+      });
+    }
+  }
+
+  const [directRes, proxyRes] = await Promise.all([directPromise, proxyPromise]);
+
+  return {
+    direct: directRes && directRes.ok && directRes.data.status === 'success' ? {
+      ip: directRes.data.query,
+      country: directRes.data.country,
+      city: directRes.data.city,
+      countryCode: directRes.data.countryCode,
+    } : null,
+    proxy: proxyRes && proxyRes.ok && proxyRes.data.status === 'success' ? {
+      ip: proxyRes.data.query,
+      country: proxyRes.data.country,
+      city: proxyRes.data.city,
+      countryCode: proxyRes.data.countryCode,
+    } : null,
+  };
+}
+
+module.exports = {
+  scan, classify, buildCandidates, parseProxyUrl,
+  httpConnect, socks5Connect, pingTargets, fetchIpInfo,
+  LOGIN_TARGET, MODEL_TARGET, PING_TARGETS, DEFAULT_CANDIDATES,
+};

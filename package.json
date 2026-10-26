@@ -1,6 +1,6 @@
 {
   "name": "antigravity-launcher",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "description": "Cross-platform process-local proxy launcher for Google Antigravity",
   "main": "src/main.js",
   "author": {

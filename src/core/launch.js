@@ -1,5 +1,6 @@
 const { spawn, spawnSync } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 
 // The launcher's own executable is named "Antigravity Launcher.exe" /
 // "Antigravity.Launcher-*.exe", so a prefix match on "antigravity" would
@@ -61,6 +62,87 @@ function buildEnv(ep) {
     ALL_PROXY: socks, all_proxy: socks,
     NO_PROXY: 'localhost,127.0.0.1,::1',
     no_proxy: 'localhost,127.0.0.1,::1',
+  };
+}
+
+function buildProxyCommands(ep) {
+  const isWin = process.platform === 'win32';
+  const isMac = process.platform === 'darwin';
+  const isLinux = process.platform === 'linux';
+
+  const http = ep ? urlFor(ep, 'http') : '';
+  const socks = ep ? urlFor(ep, 'socks5') : '';
+  const hostPort = ep ? `${ep.host}:${ep.port}` : '';
+
+  // 1. Unix 通用 shell (bash/zsh) export 命令
+  const shellExport = ep
+    ? `export HTTP_PROXY="${http}" && export HTTPS_PROXY="${http}" && export ALL_PROXY="${socks}" && export NO_PROXY="localhost,127.0.0.1,::1"`
+    : '';
+  const shellUnset = 'unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy';
+
+  // 2. Windows PowerShell 命令
+  const powershell = ep
+    ? `$env:HTTP_PROXY="${http}"; $env:HTTPS_PROXY="${http}"; $env:ALL_PROXY="${socks}"; $env:NO_PROXY="localhost,127.0.0.1,::1"`
+    : '';
+  const powershellUnset = 'Remove-Item env:HTTP_PROXY, env:HTTPS_PROXY, env:ALL_PROXY, env:NO_PROXY -ErrorAction SilentlyContinue';
+
+  // 3. Windows CMD 命令
+  const cmd = ep
+    ? `set "HTTP_PROXY=${http}" && set "HTTPS_PROXY=${http}" && set "ALL_PROXY=${socks}" && set "NO_PROXY=localhost,127.0.0.1,::1"`
+    : '';
+  const cmdUnset = 'set "HTTP_PROXY=" && set "HTTPS_PROXY=" && set "ALL_PROXY=" && set "NO_PROXY="';
+
+  // 4. Git 代理命令
+  const git = ep
+    ? `git config --global http.proxy ${http} && git config --global https.proxy ${http}`
+    : '';
+  const gitUnset = 'git config --global --unset http.proxy && git config --global --unset https.proxy';
+
+  // 5. 操作系统全局代理设置/清除命令
+  let sysProxy = '';
+  let sysProxyUnset = '';
+  if (isWin) {
+    sysProxy = ep
+      ? `reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable /t REG_DWORD /d 1 /f && reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyServer /t REG_SZ /d "${hostPort}" /f`
+      : '';
+    sysProxyUnset = 'reg add "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings" /v ProxyEnable /t REG_DWORD /d 0 /f';
+  } else if (isMac) {
+    sysProxy = ep
+      ? `networksetup -setwebproxy "Wi-Fi" ${ep.host} ${ep.port} && networksetup -setsecurewebproxy "Wi-Fi" ${ep.host} ${ep.port}`
+      : '';
+    sysProxyUnset = 'networksetup -setwebproxystate "Wi-Fi" off && networksetup -setsecurewebproxystate "Wi-Fi" off';
+  } else if (isLinux) {
+    sysProxy = ep
+      ? `gsettings set org.gnome.system.proxy mode 'manual' && gsettings set org.gnome.system.proxy.http host '${ep.host}' && gsettings set org.gnome.system.proxy.http port ${ep.port}`
+      : '';
+    sysProxyUnset = `gsettings set org.gnome.system.proxy mode 'none'`;
+  }
+
+  // 6. 带启动终端的完整单行快捷命令
+  let launchTerminalCmd = '';
+  if (isWin) {
+    launchTerminalCmd = ep
+      ? `powershell -NoExit -Command "$env:HTTP_PROXY='${http}'; $env:HTTPS_PROXY='${http}'; $env:ALL_PROXY='${socks}'; Write-Host '[AGY] Proxy environment set -> ${http}'"`
+      : `powershell -NoExit`;
+  } else {
+    launchTerminalCmd = ep
+      ? `bash -c "export HTTP_PROXY='${http}' && export HTTPS_PROXY='${http}' && export ALL_PROXY='${socks}' && echo '[AGY] Proxy environment set' && exec bash"`
+      : `bash`;
+  }
+
+  return {
+    platform: process.platform,
+    shell: shellExport,
+    shellUnset,
+    powershell,
+    powershellUnset,
+    cmd,
+    cmdUnset,
+    git,
+    gitUnset,
+    sysProxy,
+    sysProxyUnset,
+    launchTerminalCmd,
   };
 }
 
@@ -207,4 +289,77 @@ async function launch(ep, targetPath, onRaise) {
   return { pid: child.pid, spawnError };
 }
 
-module.exports = { listRunning, killInstances, buildEnv, launch, urlFor, redact, raiseWindow };
+function openTerminal({ type = 'powershell', workDir, ep }) {
+  const validDir = workDir && fs.existsSync(workDir) ? workDir : (process.env.USERPROFILE || process.env.HOME || process.cwd());
+  const env = { ...process.env, ...(ep ? buildEnv(ep) : {}) };
+
+  if (process.platform === 'win32') {
+    if (type === 'cmd') {
+      const http = ep ? urlFor(ep, 'http') : '';
+      const socks = ep ? urlFor(ep, 'socks5') : '';
+      const cmdScript = ep
+        ? `cd /d "${validDir}" && set "HTTP_PROXY=${http}" && set "HTTPS_PROXY=${http}" && set "ALL_PROXY=${socks}" && set "NO_PROXY=localhost,127.0.0.1,::1" && echo [AGY] Proxy environment set -> ${http}`
+        : `cd /d "${validDir}" && echo [AGY] Terminal ready`;
+      const child = spawn('cmd.exe', ['/c', 'start', '""', 'cmd.exe', '/K', cmdScript], {
+        cwd: validDir,
+        env,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+      child.unref();
+      return { ok: true, dir: validDir };
+    } else {
+      // powershell
+      const http = ep ? urlFor(ep, 'http') : '';
+      const socks = ep ? urlFor(ep, 'socks5') : '';
+      const psScript = ep
+        ? `Set-Location '${validDir}'; $env:HTTP_PROXY='${http}'; $env:HTTPS_PROXY='${http}'; $env:ALL_PROXY='${socks}'; $env:NO_PROXY='localhost,127.0.0.1,::1'; Write-Host '[AGY] Proxy environment set -> ${http}' -ForegroundColor Cyan`
+        : `Set-Location '${validDir}'; Write-Host '[AGY] Terminal ready' -ForegroundColor Yellow`;
+      const child = spawn('cmd.exe', ['/c', 'start', '""', 'powershell.exe', '-NoExit', '-Command', psScript], {
+        cwd: validDir,
+        env,
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+      child.unref();
+      return { ok: true, dir: validDir };
+    }
+  } else if (process.platform === 'darwin') {
+    // macOS
+    const http = ep ? urlFor(ep, 'http') : '';
+    const socks = ep ? urlFor(ep, 'socks5') : '';
+    const envExports = ep
+      ? `export HTTP_PROXY="${http}" && export HTTPS_PROXY="${http}" && export ALL_PROXY="${socks}" && export NO_PROXY="localhost,127.0.0.1,::1" && `
+      : '';
+    const script = `tell application "Terminal" to do script "cd '${validDir}' && ${envExports}echo '[AGY] Proxy environment set'"` ;
+    spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' }).unref();
+    return { ok: true, dir: validDir };
+  } else {
+    // Linux
+    const http = ep ? urlFor(ep, 'http') : '';
+    const socks = ep ? urlFor(ep, 'socks5') : '';
+    const envExports = ep
+      ? `export HTTP_PROXY="${http}"; export HTTPS_PROXY="${http}"; export ALL_PROXY="${socks}"; `
+      : '';
+    const child = spawn('x-terminal-emulator', ['-e', `bash -c "cd '${validDir}'; ${envExports}echo '[AGY] Proxy environment set'; exec bash"`], {
+      cwd: validDir,
+      env,
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.on('error', () => {
+      spawn('gnome-terminal', ['--', 'bash', '-c', `cd '${validDir}'; ${envExports}echo '[AGY] Proxy environment set'; exec bash`], {
+        cwd: validDir,
+        env,
+        detached: true,
+        stdio: 'ignore',
+      }).unref();
+    });
+    child.unref();
+    return { ok: true, dir: validDir };
+  }
+}
+
+module.exports = { listRunning, killInstances, buildEnv, buildProxyCommands, openTerminal, launch, urlFor, redact, raiseWindow };

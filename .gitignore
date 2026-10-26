@@ -2,3 +2,10 @@ node_modules/
 dist/
 build/raw/
 *.log
+
+# 宣传视频工程（HyperFrames）：成片与渲染缓存不入库，npx hyperframes render 可重出
+promo/renders/
+promo-vertical/renders/
+.hyperframes/
+promo-vertical/
+promo/

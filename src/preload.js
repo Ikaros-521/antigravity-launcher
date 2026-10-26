@@ -9,9 +9,13 @@ const on = (channel, fn) => {
 contextBridge.exposeInMainWorld('launcher', {
   boot: () => ipcRenderer.invoke('boot'),
   probe: () => ipcRenderer.invoke('probe'),
+  diagnoseNetwork: () => ipcRenderer.invoke('diagnose-network'),
   launch: () => ipcRenderer.invoke('launch'),
   quitInstances: pids => ipcRenderer.invoke('quit-instances', pids),
   chooseTarget: () => ipcRenderer.invoke('choose-target'),
+  chooseWorkDir: () => ipcRenderer.invoke('choose-work-dir'),
+  openTerminal: type => ipcRenderer.invoke('open-terminal', { type }),
+  getProxyCommands: () => ipcRenderer.invoke('get-proxy-commands'),
   setProxy: url => ipcRenderer.invoke('set-proxy', url),
   openExternal: url => ipcRenderer.invoke('open-external', url),
   win: action => ipcRenderer.send('win', action),

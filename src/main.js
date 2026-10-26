@@ -7,6 +7,7 @@ const launch = require('./core/launch');
 
 let win = null;
 let cfg = null;
+let lastBestProxy = null;
 
 const APP_NAME = { en: 'Antigravity Launcher', zh: '反重力代理启动器' };
 
@@ -108,6 +109,7 @@ ipcMain.handle('probe', async () => {
     });
   });
   out.proxyBest = best.best;
+  lastBestProxy = best.best;
   out.results = best.results;
   log(best.best ? 'ok' : 'err', best.best ? 'log.proxyOk' : 'log.proxyNone',
     best.best && {
@@ -133,6 +135,7 @@ ipcMain.handle('launch', async () => {
 
   const best = await proxy.scan(cfg.data.proxyUrl).then(r => r.best);
   if (!best) return { ok: false, errKey: 'err.noProxy' };
+  lastBestProxy = best;
 
   const res = await launch.launch(best, target.path, msg => log('sys', 'log.raised', { msg }));
   if (res.spawnError) {
@@ -163,8 +166,81 @@ ipcMain.handle('choose-target', async () => {
   return r.filePaths[0];
 });
 
+ipcMain.handle('choose-work-dir', async () => {
+  const r = await dialog.showOpenDialog(win, {
+    title: 'Select Working Directory / 选择工作目录',
+    properties: ['openDirectory', 'createDirectory'],
+    defaultPath: cfg.data.workDir || app.getPath('home'),
+  });
+  if (r.canceled || !r.filePaths[0]) return null;
+  const chosen = r.filePaths[0];
+  cfg.set({ workDir: chosen });
+  log('ok', 'log.workDirSet', { path: chosen });
+  return chosen;
+});
+
+ipcMain.handle('open-terminal', async (e, { type }) => {
+  let best = lastBestProxy;
+  if (!best) {
+    const scanRes = await proxy.scan(cfg.data.proxyUrl);
+    best = scanRes.best;
+    lastBestProxy = best;
+  }
+  const res = launch.openTerminal({
+    type: type || 'powershell',
+    workDir: cfg.data.workDir,
+    ep: best,
+  });
+  log('ok', 'log.terminalOpened', {
+    type: (type || 'powershell').toUpperCase(),
+    dir: res.dir,
+    ep: best ? launch.redact(best) : 'DIRECT',
+  });
+  return res;
+});
+
+ipcMain.handle('diagnose-network', async () => {
+  let best = lastBestProxy;
+  if (!best) {
+    const scanRes = await proxy.scan(cfg.data.proxyUrl);
+    best = scanRes.best;
+    lastBestProxy = best;
+  }
+  const [pings, ipInfo] = await Promise.all([
+    proxy.pingTargets(best),
+    proxy.fetchIpInfo(best),
+  ]);
+
+  if (ipInfo.direct) {
+    log('ok', 'log.directIp', { ip: ipInfo.direct.ip, country: ipInfo.direct.country || '' });
+  }
+  if (ipInfo.proxy) {
+    log('ok', 'log.proxyIp', { ip: ipInfo.proxy.ip, country: ipInfo.proxy.country || '' });
+  }
+  for (const p of pings) {
+    if (p.ok) {
+      log('ok', 'log.pingOk', { label: p.label, rtt: `${p.rtt}ms` });
+    } else {
+      log('warn', 'log.pingFail', { label: p.label, reason: p.reason });
+    }
+  }
+
+  return { pings, ipInfo, proxy: best };
+});
+
+ipcMain.handle('get-proxy-commands', async () => {
+  let best = lastBestProxy;
+  if (!best) {
+    const scanRes = await proxy.scan(cfg.data.proxyUrl);
+    best = scanRes.best;
+    lastBestProxy = best;
+  }
+  return launch.buildProxyCommands(best);
+});
+
 ipcMain.handle('set-proxy', (e, url) => {
   cfg.set({ proxyUrl: url || null });
+  lastBestProxy = null;
   log('ok', url ? 'log.manualProxy' : 'log.clearedProxy', url && { url });
   return cfg.data;
 });

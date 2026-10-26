@@ -4,7 +4,7 @@ const path = require('path');
 class Config {
   constructor(dir) {
     this.file = path.join(dir, 'config.json');
-    this.data = { proxyUrl: null, targetPath: null, rememberTarget: true, lastProbe: null };
+    this.data = { proxyUrl: null, targetPath: null, rememberTarget: true, lastProbe: null, workDir: null };
     this.load();
   }
 
