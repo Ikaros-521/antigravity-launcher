@@ -1,30 +1,41 @@
 const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 
+// The launcher's own executable is named "Antigravity Launcher.exe" /
+// "Antigravity.Launcher-*.exe", so a prefix match on "antigravity" would
+// report the launcher as a stale Antigravity instance — and then kill it.
 function listRunning(targetPath) {
-  const base = path.basename(targetPath || '').toLowerCase();
+  const base = (targetPath ? path.basename(targetPath) : 'Antigravity').toLowerCase();
+  const isTarget = name => name.toLowerCase() === base;
+  const self = process.pid;
+
   if (process.platform === 'win32') {
     const r = spawnSync('tasklist', ['/FO', 'CSV', '/NH'], { encoding: 'utf8' });
     return (r.stdout || '').split('\n').map(line => {
       const m = line.match(/^"([^"]+)","(\d+)"/);
       if (!m) return null;
-      return m[1].toLowerCase().startsWith('antigravity') ? { name: m[1], pid: Number(m[2]) } : null;
+      const pid = Number(m[2]);
+      return isTarget(m[1]) && pid !== self ? { name: m[1], pid } : null;
     }).filter(Boolean);
   }
   const r = spawnSync('ps', ['-axo', 'pid=,comm='], { encoding: 'utf8' });
   return (r.stdout || '').split('\n').map(line => {
     const m = line.trim().match(/^(\d+)\s+(.+)$/);
     if (!m) return null;
-    const comm = path.basename(m[2]).toLowerCase();
-    return comm.startsWith('antigravity') ? { name: path.basename(m[2]), pid: Number(m[1]) } : null;
+    const pid = Number(m[1]);
+    const name = path.basename(m[2]);
+    return isTarget(name) && pid !== self ? { name, pid } : null;
   }).filter(Boolean);
 }
 
 function killInstances(pids) {
+  // Never act on our own process, whatever the caller passed in.
+  const targets = (pids || []).map(Number).filter(p => p && p !== process.pid);
+  if (!targets.length) return;
   if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/F', '/T', '/PID', String(pids[0])], { encoding: 'utf8' });
+    spawnSync('taskkill', ['/F', '/T', '/PID', String(targets[0])], { encoding: 'utf8' });
   } else {
-    for (const pid of pids) { try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ } }
+    for (const pid of targets) { try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ } }
   }
 }
 

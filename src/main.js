@@ -15,6 +15,11 @@ const emit = (channel, payload) => { if (win && !win.isDestroyed()) win.webConte
 // them if the language changes after they were written.
 const log = (level, k, p) => emit('log', { level, k, p, ts: Date.now() });
 
+function resolveTarget() {
+  const saved = cfg.data.targetPath && detect.exists(cfg.data.targetPath) ? cfg.data.targetPath : null;
+  return saved ? detect.pack(saved, 'saved') : detect.detect();
+}
+
 const winState = () => ({
   maximized: win.isMaximized(),
   fullscreen: win.isFullScreen(),
@@ -72,8 +77,7 @@ ipcMain.handle('boot', () => ({
 ipcMain.handle('probe', async () => {
   const out = { target: null, proxyBest: null, results: [], running: [] };
 
-  const saved = cfg.data.targetPath && detect.exists(cfg.data.targetPath) ? cfg.data.targetPath : null;
-  out.target = saved ? detect.pack(saved, 'saved') : detect.detect();
+  out.target = resolveTarget();
   log(out.target.found ? 'ok' : 'warn',
     out.target.found ? 'log.foundTarget' : 'log.noTarget',
     out.target.found ? { path: out.target.path, source: out.target.source } : undefined);
@@ -101,8 +105,7 @@ ipcMain.handle('probe', async () => {
 });
 
 ipcMain.handle('launch', async () => {
-  const saved = cfg.data.targetPath && detect.exists(cfg.data.targetPath) ? cfg.data.targetPath : null;
-  const target = saved ? detect.pack(saved, 'saved') : detect.detect();
+  const target = resolveTarget();
   if (!target.found) return { ok: false, errKey: 'err.noTarget' };
 
   const running = launch.listRunning(target.path);
@@ -122,7 +125,7 @@ ipcMain.handle('launch', async () => {
 ipcMain.handle('quit-instances', (e, pids) => {
   launch.killInstances(pids || []);
   log('warn', 'log.killed', { pids: (pids || []).join(', ') });
-  return launch.listRunning(null);
+  return launch.listRunning(resolveTarget().path);
 });
 
 ipcMain.handle('choose-target', async () => {
