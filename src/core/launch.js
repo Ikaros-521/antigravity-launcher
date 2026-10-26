@@ -64,7 +64,69 @@ function buildEnv(ep) {
   };
 }
 
-function launch(ep, targetPath) {
+// Antigravity does not always activate its own window when it is started by
+// another process, so it can come up behind the launcher. The launcher still
+// holds foreground rights (the user just clicked it), so it raises the new
+// process's window explicitly instead of hoping the target does it.
+const RAISE_PS = `
+param()
+Add-Type @"
+using System; using System.Runtime.InteropServices; using System.Collections.Generic;
+public class AggyRaise {
+  public delegate bool EnumProc(IntPtr h, IntPtr l);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr l);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
+}
+"@
+$want = [uint32]$args[0]
+$hits = New-Object System.Collections.Generic.List[IntPtr]
+$cb = [AggyRaise+EnumProc]{
+  param($h, $l)
+  $p = [uint32]0
+  [void][AggyRaise]::GetWindowThreadProcessId($h, [ref]$p)
+  if ($p -eq $want -and [AggyRaise]::IsWindowVisible($h)) { $hits.Add($h) }
+  return $true
+}
+$deadline = (Get-Date).AddSeconds(12)
+while ((Get-Date) -lt $deadline) {
+  $hits.Clear()
+  [void][AggyRaise]::EnumWindows($cb, [IntPtr]::Zero)
+  if ($hits.Count -gt 0) {
+    $h = $hits[0]
+    [void][AggyRaise]::ShowWindow($h, 9)
+    [void][AggyRaise]::BringWindowToTop($h)
+    [void][AggyRaise]::SetForegroundWindow($h)
+    break
+  }
+  Start-Sleep -Milliseconds 400
+}
+`;
+
+function raiseWindow(pid, appName) {
+  if (!pid) return;
+  let cmd, args;
+  if (process.platform === 'win32') {
+    cmd = 'powershell.exe';
+    args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', RAISE_PS, String(pid)];
+  } else if (process.platform === 'darwin') {
+    cmd = 'osascript';
+    args = ['-e', `tell application "${appName || 'Antigravity'}" to activate`];
+  } else {
+    cmd = 'wmctrl';
+    args = ['-a', 'Antigravity'];
+  }
+  try {
+    const p = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true });
+    p.on('error', () => { /* raising is best effort; never fail a launch over it */ });
+    p.unref();
+  } catch { /* same */ }
+}
+
+async function launch(ep, targetPath) {
   const env = { ...process.env, ...buildEnv(ep) };
   const args = [
     `--proxy-server=http://${ep.host}:${ep.port}`,
@@ -77,8 +139,14 @@ function launch(ep, targetPath) {
     stdio: 'ignore',
     windowsHide: true,
   });
+  let spawnError = null;
+  child.on('error', err => { spawnError = err; });
   child.unref();
-  return { pid: child.pid, spawnError: child.spawnerr || null };
+  // spawn() reports ENOENT etc. on the next tick, so read it after a short
+  // settle instead of claiming success before the event can land.
+  await new Promise(r => setTimeout(r, 400));
+  if (!spawnError) raiseWindow(child.pid, path.basename(path.dirname(path.dirname(targetPath)), '.app'));
+  return { pid: child.pid, spawnError };
 }
 
-module.exports = { listRunning, killInstances, buildEnv, launch, urlFor, redact };
+module.exports = { listRunning, killInstances, buildEnv, launch, urlFor, redact, raiseWindow };

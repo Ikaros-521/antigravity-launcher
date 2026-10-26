@@ -134,7 +134,7 @@ ipcMain.handle('launch', async () => {
   const best = await proxy.scan(cfg.data.proxyUrl).then(r => r.best);
   if (!best) return { ok: false, errKey: 'err.noProxy' };
 
-  const res = launch.launch(best, target.path);
+  const res = await launch.launch(best, target.path);
   log(res.spawnError ? 'err' : 'ok', res.spawnError ? 'log.spawnFail' : 'log.launched',
     res.spawnError ? { msg: res.spawnError.message } : { pid: res.pid, ep: launch.redact(best) });
   return { ok: !res.spawnError, pid: res.pid, endpoint: launch.redact(best), kind: best.kind };
