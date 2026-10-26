@@ -8,14 +8,19 @@ A process-local proxy launcher for the Google Antigravity desktop client. It giv
 
 ## 下载 / Download
 
-**安装包请到 [Releases](https://github.com/Ikaros-521/antigravity-launcher/releases) 页面下载**，每次打 tag 由 GitHub Actions 自动构建并上传三平台产物：
+**安装包请到 [Releases](https://github.com/Ikaros-521/antigravity-launcher/releases) 页面下载**，每次打 tag 由 GitHub Actions 自动构建并上传三平台产物。以 v1.0.0 为例（文件名里的空格会被转成 `.`）：
 
 | 平台 | 文件 | 说明 |
 |---|---|---|
-| Windows | `*-Setup-*-win-x64.exe` | NSIS 安装器，可选安装目录 |
-| Windows | `*-win-x64.exe`（portable） | 免安装单文件 |
-| macOS | `*-mac-arm64.dmg` / `*-mac-x64.dmg` | Apple Silicon 与 Intel，另有同名 `.zip` |
-| Linux | `*-linux-x64.AppImage` / `.deb` | 含 arm64 版本 |
+| Windows | `Antigravity.Launcher-Setup-1.0.0-win-x64.exe` | NSIS 安装器，可选安装目录 |
+| Windows | `Antigravity.Launcher-1.0.0-win-x64.exe` | 免安装 portable 单文件 |
+| macOS | `Antigravity.Launcher-1.0.0-mac-arm64.dmg` | Apple Silicon；另有同名 `.zip` |
+| macOS | `Antigravity.Launcher-1.0.0-mac-x64.dmg` | Intel；另有同名 `.zip` |
+| Linux | `Antigravity.Launcher-1.0.0-linux-x86_64.AppImage` | x86_64 AppImage |
+| Linux | `Antigravity.Launcher-1.0.0-linux-arm64.AppImage` | arm64 AppImage |
+| Linux | `Antigravity.Launcher-1.0.0-linux-amd64.deb` / `linux-arm64.deb` | deb 包 |
+
+Release 里那几个 `latest*.yml` 是 electron-builder 的自动更新元数据，不是给手动下载的，忽略即可。
 
 Please download installers from the Releases page. macOS builds are **not signed or notarised** — see [macOS 放行](#macos-放行--gatekeeper).
 
