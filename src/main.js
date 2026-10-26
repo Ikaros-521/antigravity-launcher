@@ -8,6 +8,11 @@ const launch = require('./core/launch');
 let win = null;
 let cfg = null;
 
+const emit = (channel, payload) => { if (win && !win.isDestroyed()) win.webContents.send(channel, payload); };
+// Logs travel as {k, p} so the renderer can translate them — and re-translate
+// them if the language changes after they were written.
+const log = (level, k, p) => emit('log', { level, k, p, ts: Date.now() });
+
 function createWindow() {
   const isMac = process.platform === 'darwin';
   win = new BrowserWindow({
@@ -30,82 +35,76 @@ function createWindow() {
   });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
   win.once('ready-to-show', () => win.show());
-}
 
-const emit = (channel, payload) => { if (win && !win.isDestroyed()) win.webContents.send(channel, payload); };
-
-function log(level, text) {
-  emit('log', { level, text, ts: Date.now() });
+  const pushVisible = () => emit('visibility', { visible: !win.isMinimized() && win.isVisible() && !win.isDestroyed() });
+  for (const ev of ['minimize', 'restore', 'show', 'hide', 'focus', 'blur']) win.on(ev, pushVisible);
 }
 
 ipcMain.handle('boot', () => ({
   platform: process.platform,
   appVersion: app.getVersion(),
   config: cfg.data,
-  home: app.getPath('home'),
 }));
 
 ipcMain.handle('probe', async () => {
   const out = { target: null, proxyBest: null, results: [], running: [] };
 
-  const manualTarget = cfg.data.targetPath && detect.exists(cfg.data.targetPath) ? cfg.data.targetPath : null;
-  out.target = manualTarget ? detect.pack(manualTarget, 'saved') : detect.detect();
+  const saved = cfg.data.targetPath && detect.exists(cfg.data.targetPath) ? cfg.data.targetPath : null;
+  out.target = saved ? detect.pack(saved, 'saved') : detect.detect();
   log(out.target.found ? 'ok' : 'warn',
-    out.target.found
-      ? `CH02 已定位 ${out.target.path}（${out.target.source}）`
-      : 'CH02 未找到 Antigravity，请手动指定');
+    out.target.found ? 'log.foundTarget' : 'log.noTarget',
+    out.target.found ? { path: out.target.path, source: out.target.source } : undefined);
 
-  emit('probe:phase', 'proxy');
   const best = await proxy.scan(cfg.data.proxyUrl, r => {
     emit('probe:candidate', {
+      host: r.host, port: r.port, scheme: r.scheme,
       endpoint: `${r.scheme}://${r.host}:${r.port}`,
       origin: r.origin, kind: r.kind, loginOk: r.loginOk, modelOk: r.modelOk, detail: r.detail,
     });
   });
   out.proxyBest = best.best;
   out.results = best.results;
-  log(best.best ? 'ok' : 'err',
-    best.best
-      ? `CH01 代理可用：${launch.redact(best.best)}（类型 ${best.best.kind}，登录端点已验证，模型端点${best.best.modelOk ? '已验证' : '未验证'}）`
-      : 'CH01 没有任何候选端口通过 CONNECT / SOCKS5 握手');
+  log(best.best ? 'ok' : 'err', best.best ? 'log.proxyOk' : 'log.proxyNone',
+    best.best && {
+      ep: launch.redact(best.best), kind: best.best.kind,
+      model: best.best.modelOk ? 'log.proxyOk.yes' : 'log.proxyOk.no',
+    });
 
   out.running = launch.listRunning(out.target.path);
-  if (out.running.length) log('warn', `CH03 检测到 ${out.running.length} 个未注入代理的实例：PID ${out.running.map(r => r.pid).join(', ')}`);
-  else log('ok', 'CH03 无残留实例，可以干净启动');
+  log(out.running.length ? 'warn' : 'ok', out.running.length ? 'log.running' : 'log.clean',
+    out.running.length && { n: out.running.length, pids: out.running.map(r => r.pid).join(', ') });
 
-  cfg.set({ lastProbe: { at: Date.now(), best: out.proxyBest && { host: out.proxyBest.host, port: out.proxyBest.port, kind: out.proxyBest.kind } } });
   return out;
 });
 
 ipcMain.handle('launch', async () => {
-  const target = cfg.data.targetPath && detect.exists(cfg.data.targetPath)
-    ? detect.pack(cfg.data.targetPath, 'saved')
-    : detect.detect();
-  if (!target.found) return { ok: false, error: '未定位到 Antigravity 可执行文件' };
+  const saved = cfg.data.targetPath && detect.exists(cfg.data.targetPath) ? cfg.data.targetPath : null;
+  const target = saved ? detect.pack(saved, 'saved') : detect.detect();
+  if (!target.found) return { ok: false, errKey: 'err.noTarget' };
 
   const running = launch.listRunning(target.path);
   if (running.length) {
-    return { ok: false, needsQuit: true, running, error: '必须先完全退出旧实例，环境变量无法注入已运行的进程' };
+    return { ok: false, needsQuit: true, running, errKey: 'err.stale' };
   }
 
   const best = await proxy.scan(cfg.data.proxyUrl).then(r => r.best);
-  if (!best) return { ok: false, error: '没有可用的本地代理端点' };
+  if (!best) return { ok: false, errKey: 'err.noProxy' };
 
   const res = launch.launch(best, target.path);
-  log(res.spawnError ? 'err' : 'ok',
-    res.spawnError ? `启动失败：${res.spawnError.message}` : `已启动 PID ${res.pid}，注入 ${launch.redact(best)}`);
+  log(res.spawnError ? 'err' : 'ok', res.spawnError ? 'log.spawnFail' : 'log.launched',
+    res.spawnError ? { msg: res.spawnError.message } : { pid: res.pid, ep: launch.redact(best) });
   return { ok: !res.spawnError, pid: res.pid, endpoint: launch.redact(best), kind: best.kind };
 });
 
 ipcMain.handle('quit-instances', (e, pids) => {
   launch.killInstances(pids || []);
-  log('warn', `已终止残留实例 PID ${(pids || []).join(', ')}`);
+  log('warn', 'log.killed', { pids: (pids || []).join(', ') });
   return launch.listRunning(null);
 });
 
 ipcMain.handle('choose-target', async () => {
   const r = await dialog.showOpenDialog(win, {
-    title: '选择 Antigravity 可执行文件',
+    title: 'Antigravity executable',
     properties: ['openFile'],
     filters: process.platform === 'win32'
       ? [{ name: 'Antigravity.exe', extensions: ['exe'] }]
@@ -113,13 +112,13 @@ ipcMain.handle('choose-target', async () => {
   });
   if (r.canceled || !r.filePaths[0]) return null;
   cfg.set({ targetPath: r.filePaths[0] });
-  log('ok', `CH02 手动指定：${r.filePaths[0]}`);
+  log('ok', 'log.manualTarget', { path: r.filePaths[0] });
   return r.filePaths[0];
 });
 
 ipcMain.handle('set-proxy', (e, url) => {
   cfg.set({ proxyUrl: url || null });
-  log('ok', url ? `CH01 手动指定代理：${url}` : 'CH01 已清除手动代理，恢复自动探测');
+  log('ok', url ? 'log.manualProxy' : 'log.clearedProxy', url && { url });
   return cfg.data;
 });
 

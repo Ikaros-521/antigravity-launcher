@@ -17,5 +17,5 @@ contextBridge.exposeInMainWorld('launcher', {
   win: action => ipcRenderer.send('win', action),
   onLog: fn => on('log', fn),
   onCandidate: fn => on('probe:candidate', fn),
-  onPhase: fn => on('probe:phase', fn),
+  onVisibility: fn => on('visibility', fn),
 });

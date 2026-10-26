@@ -1,28 +1,33 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="auto">
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'">
 <title>Antigravity Launcher</title>
 <link rel="stylesheet" href="style.css">
 </head>
-<body class="platform-unknown">
+<body class="platform-unknown lang-zh">
+<div class="ambient" aria-hidden="true"><i></i><i></i><i></i></div>
 <div class="grain" aria-hidden="true"></div>
 
 <div class="chassis">
-  <i class="screw s1" aria-hidden="true"></i>
-  <i class="screw s2" aria-hidden="true"></i>
-  <i class="screw s3" aria-hidden="true"></i>
-  <i class="screw s4" aria-hidden="true"></i>
-
   <header class="rail">
     <div class="plate">
       <h1 class="plate-model">AGY·LAUNCHER <em>MK-1</em></h1>
-      <p class="plate-sub">PROCESS-LOCAL PROXY INJECTOR</p>
+      <p class="plate-sub" data-i18n="subtitle">进程级代理注入器</p>
     </div>
     <div class="rail-right">
       <span class="chip" id="osChip">—</span>
       <span class="chip ghost" id="revChip">REV —</span>
+      <div class="seg" id="langSeg" role="group" aria-label="语言 / Language">
+        <button type="button" data-lang="zh">中</button>
+        <button type="button" data-lang="en">EN</button>
+      </div>
+      <div class="seg" id="themeSeg" role="group" aria-label="主题 / Theme">
+        <button type="button" data-theme="auto" title="跟随系统" aria-label="跟随系统">◐</button>
+        <button type="button" data-theme="light" title="浅色" aria-label="浅色">☀</button>
+        <button type="button" data-theme="dark" title="深色" aria-label="深色">☾</button>
+      </div>
       <span class="winctl" id="winctl">
         <button type="button" data-act="minimize" title="最小化" aria-label="最小化">–</button>
         <button type="button" data-act="close" title="关闭" aria-label="关闭">×</button>
@@ -30,8 +35,8 @@
     </div>
   </header>
 
-  <section class="scope" aria-label="隧道连通性">
-    <div class="etiquette">TUNNEL<span class="cn">／ 隧道</span></div>
+  <section class="scope glass" aria-label="隧道连通性">
+    <div class="etiquette">TUNNEL<span class="cn" data-i18n="g.tunnel">／ 隧道</span></div>
     <div class="tunnel">
       <div class="node" id="nodeLocal" data-state="idle">
         <span class="node-main">LOCAL</span>
@@ -40,7 +45,7 @@
       <div class="wire"><i class="pulse p1"></i><i class="pulse p2"></i></div>
       <div class="node" id="nodeProxy" data-state="idle">
         <span class="node-main" id="proxyReadout">:—</span>
-        <span class="node-sub" id="proxyKindReadout">未探测</span>
+        <span class="node-sub" id="proxyKindReadout" data-i18n="node.proxyIdle">未探测</span>
       </div>
       <div class="wire"><i class="pulse p3"></i><i class="pulse p4"></i></div>
       <div class="lanes">
@@ -54,78 +59,79 @@
         </div>
       </div>
     </div>
-    <p class="hint-mac" id="hintMac">macOS 首次打开若被拦截：右键图标 → 打开；或终端执行 <code>xattr -d com.apple.quarantine</code> 后重试。本工具未做签名与公证。</p>
+    <p class="hint-mac" id="hintMac"><span data-i18n="hintMacA"></span><code>xattr -d com.apple.quarantine</code><span data-i18n="hintMacB"></span></p>
   </section>
 
   <main class="channels">
-    <div class="etiquette">CHANNELS<span class="cn">／ 通道</span></div>
+    <div class="etiquette">CHANNELS<span class="cn" data-i18n="g.channels">／ 通道</span></div>
 
-    <article class="channel" id="ch01" data-state="idle">
-      <div class="ch-id"><b>CH01</b><span>PROXY<br>ENDPOINT</span></div>
+    <article class="channel glass" id="ch01" data-state="idle">
+      <div class="ch-id"><b>CH01</b><span data-i18n="role.ch01">代理端点</span></div>
       <i class="lamp" aria-hidden="true"></i>
       <div class="ch-body">
-        <div class="ch-value mono" id="ch01Value">尚未探测</div>
-        <div class="ch-meta mono" id="ch01Meta">自动读取系统代理 → 逐个端口做 CONNECT / SOCKS5 握手</div>
+        <div class="ch-value mono" id="ch01Value">—</div>
+        <div class="ch-meta mono" id="ch01Meta"></div>
       </div>
       <div class="ch-acts">
-        <button type="button" class="btn" id="btnRetarget">重新探测</button>
-        <button type="button" class="btn ghost" id="btnProxyManual">手动指定</button>
+        <button type="button" class="btn" id="btnRetarget" data-i18n="reprobe">重新探测</button>
+        <button type="button" class="btn ghost" id="btnProxyManual" data-i18n="manual">手动指定</button>
       </div>
       <div class="ch-form" id="proxyForm" hidden>
-        <input class="input mono" id="proxyInput" type="text" placeholder="http://127.0.0.1:10808 或 socks5://127.0.0.1:7891" spellcheck="false">
-        <button type="button" class="btn" id="proxyApply">写入</button>
-        <button type="button" class="btn ghost" id="proxyClear">清除</button>
+        <input class="input mono" id="proxyInput" type="text" data-i18n-ph="proxyPlaceholder" spellcheck="false">
+        <button type="button" class="btn" id="proxyApply" data-i18n="apply">写入</button>
+        <button type="button" class="btn ghost" id="proxyClear" data-i18n="clear">清除</button>
       </div>
     </article>
 
-    <article class="channel" id="ch02" data-state="idle">
-      <div class="ch-id"><b>CH02</b><span>ANTIGRAVITY<br>BINARY</span></div>
+    <article class="channel glass" id="ch02" data-state="idle">
+      <div class="ch-id"><b>CH02</b><span data-i18n="role.ch02">客户端二进制</span></div>
       <i class="lamp" aria-hidden="true"></i>
       <div class="ch-body">
-        <div class="ch-value mono" id="ch02Value">尚未探测</div>
-        <div class="ch-meta mono" id="ch02Meta">扫描常见安装目录，并用 resources/bin/language_server 二次确认</div>
+        <div class="ch-value mono" id="ch02Value">—</div>
+        <div class="ch-meta mono" id="ch02Meta"></div>
       </div>
       <div class="ch-acts">
-        <button type="button" class="btn ghost" id="btnChoose">手动选择</button>
+        <button type="button" class="btn ghost" id="btnChoose" data-i18n="choose">手动选择</button>
       </div>
     </article>
 
-    <article class="channel" id="ch03" data-state="idle">
-      <div class="ch-id"><b>CH03</b><span>PROCESS<br>TREE</span></div>
+    <article class="channel glass" id="ch03" data-state="idle">
+      <div class="ch-id"><b>CH03</b><span data-i18n="role.ch03">进程树</span></div>
       <i class="lamp" aria-hidden="true"></i>
       <div class="ch-body">
-        <div class="ch-value mono" id="ch03Value">尚未探测</div>
-        <div class="ch-meta mono" id="ch03Meta">环境变量只在进程创建时继承，残留实例必须先退干净</div>
+        <div class="ch-value mono" id="ch03Value">—</div>
+        <div class="ch-meta mono" id="ch03Meta"></div>
       </div>
       <div class="ch-acts">
-        <button type="button" class="btn danger" id="btnKill" hidden>终止残留实例</button>
+        <button type="button" class="btn danger" id="btnKill" hidden data-i18n="kill">终止残留实例</button>
       </div>
     </article>
   </main>
 
-  <section class="envmap" aria-label="注入变量预览">
-    <div class="etiquette">INJECTION MAP<span class="cn">／ 将写入子进程环境</span></div>
+  <section class="envmap glass" aria-label="注入变量预览">
+    <div class="etiquette">INJECTION MAP<span class="cn" data-i18n="g.env">／ 将写入子进程环境</span></div>
     <div class="env-grid" id="envGrid"></div>
-    <p class="env-note">Go 的 <code>net/http</code> 完全不读 <code>ALL_PROXY</code>，也读不到 Windows 注册表代理；<em>所以 HTTP(S)_PROXY 才是 language_server 唯一认的那一组，大小写各写一份是因为部分库只认小写。</em></p>
+    <p class="env-note" data-i18n="envNote"></p>
   </section>
 
-  <button type="button" class="launchbar" id="launchBar" data-state="idle">
+  <button type="button" class="launchbar glass" id="launchBar" data-state="idle">
     <span class="lb-key" id="lbKey">READY</span>
-    <span class="lb-cn" id="lbCn">探测通道</span>
-    <span class="lb-target mono" id="lbTarget">按 Enter 或点击开始</span>
+    <span class="lb-cn" id="lbCn"></span>
+    <span class="lb-target mono" id="lbTarget"></span>
     <i class="lb-sweep" aria-hidden="true"></i>
   </button>
 
-  <aside class="console" aria-label="日志">
-    <div class="etiquette">CONSOLE<span class="cn">／ 日志</span></div>
+  <aside class="console glass" aria-label="日志">
+    <div class="etiquette">CONSOLE<span class="cn" data-i18n="g.console">／ 日志</span></div>
     <div class="console-body mono" id="consoleBody"></div>
     <div class="console-foot mono">
-      <span>仅向 Antigravity 进程树注入代理</span>
-      <span>不开 TUN · 不改系统代理</span>
+      <span data-i18n="foot1">仅向 Antigravity 进程树注入代理</span>
+      <span data-i18n="foot2">不开 TUN · 不改系统代理</span>
     </div>
   </aside>
 </div>
 
+<script src="i18n.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

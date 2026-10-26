@@ -1,7 +1,10 @@
 const $ = id => document.getElementById(id);
+const t = (k, p) => window.I18N.t(k, p);
 const tunnel = document.querySelector('.tunnel');
+
 const els = {
-  osChip: $('osChip'), revChip: $('revChip'),
+  root: document.documentElement,
+  osChip: $('osChip'), revChip: $('revChip'), langSeg: $('langSeg'), themeSeg: $('themeSeg'),
   nodeLocal: $('nodeLocal'), nodeProxy: $('nodeProxy'),
   proxyReadout: $('proxyReadout'), proxyKindReadout: $('proxyKindReadout'),
   laneLogin: $('laneLogin'), laneModel: $('laneModel'),
@@ -15,10 +18,80 @@ const els = {
   consoleBody: $('consoleBody'), envGrid: $('envGrid'),
 };
 
-let best = null;
-let running = [];
+/* Single source of truth so a language switch can repaint everything. */
+const state = {
+  best: null, target: null, running: [],
+  bar: { phase: 'idle', params: {} },
+  probing: false,
+  logs: [],
+};
 
 const OS_LABEL = { win32: 'WINDOWS', darwin: 'MACOS', linux: 'LINUX' };
+const url = ep => ep && `${ep.scheme}://${ep.host}:${ep.port}`;
+
+/* --- theme & language ---------------------------------------------------- */
+
+const THEME_KEY = 'agy.theme';
+function applyTheme(mode) {
+  els.root.dataset.theme = mode;
+  localStorage.setItem(THEME_KEY, mode);
+  els.themeSeg.querySelectorAll('button').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.theme === mode)));
+}
+function applyLang(lang) {
+  window.I18N.setLang(lang);
+  document.body.classList.toggle('lang-zh', lang === 'zh');
+  window.I18N.applyStatic(document);
+  els.langSeg.querySelectorAll('button').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.lang === lang)));
+  repaint();
+}
+els.themeSeg.addEventListener('click', e => {
+  const b = e.target.closest('button[data-theme]');
+  if (b) applyTheme(b.dataset.theme);
+});
+els.langSeg.addEventListener('click', e => {
+  const b = e.target.closest('button[data-lang]');
+  if (b) applyLang(b.dataset.lang);
+});
+
+/* --- spotlight tracking --------------------------------------------------- */
+
+let rafId = null;
+const pending = new Map();
+function flushSpotlight() {
+  rafId = null;
+  for (const [el, ev] of pending) {
+    const r = el.getBoundingClientRect();
+    el.style.setProperty('--mx', `${Math.round(ev.clientX - r.left)}px`);
+    el.style.setProperty('--my', `${Math.round(ev.clientY - r.top)}px`);
+  }
+  pending.clear();
+}
+function trackSpotlight(e) {
+  if (paused) return;
+  pending.set(e.currentTarget, e);
+  if (rafId === null) rafId = requestAnimationFrame(flushSpotlight);
+}
+for (const el of document.querySelectorAll('.glass')) el.addEventListener('pointermove', trackSpotlight);
+
+/* --- cost control while hidden -------------------------------------------- */
+
+let paused = false;
+function setPaused(v) {
+  const next = !!v;
+  if (next === paused) return;
+  paused = next;
+  els.root.classList.toggle('paused', paused);
+  if (paused) {
+    if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+    pending.clear();
+  }
+}
+window.launcher.onVisibility(({ visible }) => setPaused(!visible));
+document.addEventListener('visibilitychange', () => setPaused(document.hidden));
+
+/* --- console -------------------------------------------------------------- */
 
 function stamp(ts) {
   const d = new Date(ts);
@@ -26,26 +99,130 @@ function stamp(ts) {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-function log(level, text) {
-  const row = document.createElement('div');
-  row.className = 'line';
-  row.dataset.lvl = level;
-  const t = document.createElement('time');
-  t.textContent = stamp(Date.now());
-  const m = document.createElement('span');
-  m.className = 'msg';
-  m.textContent = text;
-  row.append(t, m);
-  els.consoleBody.appendChild(row);
+function pushLog(level, k, p) {
+  state.logs.push({ level, k, p, ts: Date.now() });
+  if (state.logs.length > 400) state.logs.splice(0, state.logs.length - 400);
+  appendLogLine(state.logs[state.logs.length - 1]);
   els.consoleBody.scrollTop = els.consoleBody.scrollHeight;
-  while (els.consoleBody.children.length > 400) els.consoleBody.firstChild.remove();
 }
 
-function renderEnv(ep) {
-  const httpUrl = ep ? `http://${ep.host}:${ep.port}` : null;
+function appendLogLine(entry) {
+  const row = document.createElement('div');
+  row.className = 'line';
+  row.dataset.lvl = entry.level;
+  const time = document.createElement('time');
+  time.textContent = stamp(entry.ts);
+  const msg = document.createElement('span');
+  msg.className = 'msg';
+  msg.textContent = t(entry.k, entry.p);
+  row.append(time, msg);
+  els.consoleBody.appendChild(row);
+}
+
+function repaintLogs() {
+  els.consoleBody.replaceChildren();
+  state.logs.forEach(appendLogLine);
+  els.consoleBody.scrollTop = els.consoleBody.scrollHeight;
+}
+
+window.launcher.onLog(e => pushLog(e.level, e.k, e.p));
+
+/* --- painting ------------------------------------------------------------- */
+
+function setState(el, s) { el.dataset.state = s; }
+
+function renderBar() {
+  const { phase, params } = state.bar;
+  const map = {
+    idle: ['idle', 'idle.key', 'idle.cn', 'idle.target'],
+    probing: ['probing', 'scanning.key', 'scanning.cn', 'scanning.target'],
+    armed: ['armed', 'armed.key', 'armed.cn', null],
+    launching: ['probing', 'launching.key', 'launching.cn', null],
+    launched: ['ok', 'launched.key', 'launched.cn', null],
+    stale: ['blocked', 'stale.key', 'stale.cn', null],
+    noproxy: ['blocked', 'noproxy.key', 'noproxy.cn', null],
+    failed: ['blocked', 'failed.key', 'failed.cn', null],
+  };
+  const [ds, kKey, kCn, kTarget] = map[phase] || map.idle;
+  setState(els.launchBar, ds);
+  els.lbKey.textContent = t(kKey);
+  els.lbCn.textContent = phase === 'launched' ? `${t(kCn)} PID ${params.pid}` : t(kCn);
+  els.lbTarget.textContent = kTarget ? t(kTarget) : (params.target || '');
+}
+
+function renderProxy() {
+  const b = state.best;
+  if (state.probing) {
+    setState(els.ch01, 'scan');
+    els.ch01Value.textContent = t('ch01.probing');
+    els.ch01Meta.textContent = t('ch01.probeMeta');
+    return;
+  }
+  if (!b) {
+    setState(els.ch01, 'fail');
+    els.ch01Value.textContent = t('ch01.none');
+    els.ch01Meta.textContent = t('ch01.noneMeta');
+    return;
+  }
+  setState(els.ch01, 'ok');
+  els.ch01Value.textContent = url(b);
+  els.ch01Meta.textContent = t('ch01.okMeta', { kind: b.kind, origin: b.origin });
+}
+
+function renderTarget() {
+  const tg = state.target;
+  if (!tg) { setState(els.ch02, 'idle'); els.ch02Value.textContent = t('ch02.searching'); return; }
+  if (!tg.found) {
+    setState(els.ch02, 'fail');
+    els.ch02Value.textContent = t('ch02.none');
+    els.ch02Meta.textContent = t('ch02.noneMeta');
+    return;
+  }
+  setState(els.ch02, 'ok');
+  els.ch02Value.textContent = tg.path;
+  els.ch02Meta.textContent = t(tg.languageServer ? 'ch02.okMetaLs' : 'ch02.okMetaNoLs', { source: tg.source });
+}
+
+function renderRunning() {
+  const list = state.running;
+  els.btnKill.hidden = !list.length;
+  if (!list.length) {
+    setState(els.ch03, 'ok');
+    els.ch03Value.textContent = t('ch03.clean');
+    els.ch03Meta.textContent = t('ch03.cleanMeta');
+    return;
+  }
+  setState(els.ch03, 'fail');
+  els.ch03Value.textContent = t('ch03.stale', { n: list.length, pids: list.map(r => r.pid).join(', ') });
+  els.ch03Meta.textContent = t('ch03.staleMeta');
+}
+
+function renderTunnel() {
+  const b = state.best;
+  tunnel.classList.toggle('scanning', state.probing);
+  tunnel.classList.toggle('live', !!b && !state.probing);
+  setState(els.nodeLocal, state.probing ? 'scan' : 'live');
+  if (!b) {
+    setState(els.nodeProxy, state.probing ? 'scan' : 'dead');
+    els.proxyKindReadout.textContent = state.probing ? t('node.proxyIdle') : '—';
+    if (!state.probing) els.proxyReadout.textContent = ':—';
+    setState(els.laneLogin, 'idle'); setState(els.laneModel, 'idle');
+    return;
+  }
+  setState(els.nodeProxy, 'live');
+  els.proxyReadout.textContent = `:${b.port}`;
+  els.proxyKindReadout.textContent = b.kind.toUpperCase();
+  setState(els.laneLogin, 'open');
+  setState(els.laneModel, b.modelOk ? 'open' : 'blocked');
+}
+
+function renderEnv() {
+  const b = state.best;
+  const http = b && `http://${b.host}:${b.port}`;
+  const socks = b && `socks5://${b.host}:${b.port}`;
   const rows = [
-    ['HTTPS_PROXY', httpUrl], ['HTTP_PROXY', httpUrl], ['ALL_PROXY', ep ? `socks5://${ep.host}:${ep.port}` : null],
-    ['https_proxy', httpUrl], ['http_proxy', httpUrl], ['all_proxy', ep ? `socks5://${ep.host}:${ep.port}` : null],
+    ['HTTPS_PROXY', http], ['HTTP_PROXY', http], ['ALL_PROXY', socks],
+    ['https_proxy', http], ['http_proxy', http], ['all_proxy', socks],
     ['NO_PROXY', 'localhost,127.0.0.1,::1'], ['no_proxy', 'localhost,127.0.0.1,::1'],
   ];
   els.envGrid.replaceChildren(...rows.map(([k, v]) => {
@@ -60,13 +237,76 @@ function renderEnv(ep) {
   }));
 }
 
-function setState(el, s) { el.dataset.state = s; }
+function repaint() {
+  renderTunnel(); renderProxy(); renderTarget(); renderRunning(); renderBar(); renderEnv();
+  repaintLogs();
+}
 
-function bar(state, key, cn, target) {
-  els.launchBar.dataset.state = state;
-  els.lbKey.textContent = key;
-  els.lbCn.textContent = cn;
-  els.lbTarget.textContent = target;
+/* --- probe & launch ------------------------------------------------------- */
+
+async function doProbe() {
+  state.best = null; state.running = []; state.probing = true;
+  state.target = null;
+  els.proxyForm.hidden = true;
+  repaint();
+  pushLog('sys', 'log.startProbe');
+
+  const res = await window.launcher.probe();
+  state.probing = false;
+  state.target = res.target;
+  state.running = res.running;
+  state.best = res.proxyBest;
+  state.bar = state.best
+    ? { phase: 'armed', params: { target: `:${state.best.port} ${state.best.kind}` } }
+    : { phase: 'noproxy', params: {} };
+  repaint();
+}
+
+window.launcher.onCandidate(c => {
+  pushLog(c.loginOk ? 'ok' : c.kind === 'dead' ? 'err' : 'warn',
+    c.loginOk ? 'log.candidateOk' : 'log.candidateFail',
+    {
+      ep: c.endpoint, origin: c.origin, kind: c.kind,
+      model: c.modelOk ? 'log.candPass.yes' : 'log.candPass.no',
+      detail: c.detail,
+    });
+  if (c.loginOk && !state.best) {
+    state.best = c;
+    renderTunnel(); renderProxy(); renderEnv();
+  }
+});
+
+function doLaunch() {
+  if (state.running.length) {
+    state.bar = { phase: 'stale', params: { target: t('err.blockedStale') } };
+    pushLog('err', 'err.blockedStale');
+    renderBar();
+    return;
+  }
+  if (!state.best) {
+    state.bar = { phase: 'noproxy', params: { target: t('err.blockedProxy') } };
+    pushLog('err', 'err.blockedProxy');
+    renderBar();
+    return;
+  }
+  launchNow();
+}
+
+async function launchNow() {
+  state.bar = { phase: 'launching', params: { target: `:${state.best.port} ${state.best.kind}` } };
+  renderBar();
+  const r = await window.launcher.launch();
+  if (r.ok) {
+    state.bar = { phase: 'launched', params: { pid: r.pid, target: `${r.endpoint} · ${r.kind}` } };
+    renderBar();
+  } else if (r.needsQuit) {
+    state.running = r.running;
+    state.bar = { phase: 'stale', params: { target: t(r.errKey) } };
+    renderRunning();
+  } else {
+    state.bar = { phase: 'failed', params: { target: t(r.errKey || 'err.noProxy') } };
+  }
+  renderBar();
 }
 
 els.launchBar.addEventListener('click', doLaunch);
@@ -74,96 +314,14 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && document.activeElement === document.body) doLaunch();
 });
 
-async function doProbe() {
-  best = null; running = [];
-  tunnel.classList.add('scanning');
-  tunnel.classList.remove('live');
-  setState(els.nodeLocal, 'scan');
-  setState(els.nodeProxy, 'scan');
-  for (const ch of [els.ch01, els.ch02, els.ch03]) setState(ch, 'scan');
-  els.ch01Value.textContent = '读取系统代理并逐个握手验证…';
-  els.ch01Meta.textContent = 'HTTP CONNECT 与 SOCKS5 双模探测，目标域名不预解析';
-  els.ch02Value.textContent = '搜索安装目录…';
-  setState(els.ch03, 'idle'); els.ch03Value.textContent = '等待前两条通道';
-  els.btnKill.hidden = true;
-  bar('probing', 'SCANNING', '通道探测中', '正在验证代理与安装路径');
-  log('sys', '开始探测 — 系统代理优先，其后扫描常见本地端口');
-
-  const res = await window.launcher.probe();
-
-  tunnel.classList.remove('scanning');
-  applyTarget(res.target);
-  applyRunning(res.running);
-  renderEnv(res.proxyBest);
-
-  if (res.proxyBest) {
-    best = res.proxyBest;
-    tunnel.classList.add('live');
-    setState(els.nodeLocal, 'live');
-    setState(els.nodeProxy, 'live');
-    els.proxyReadout.textContent = `:${best.port}`;
-    els.proxyKindReadout.textContent = best.kind.toUpperCase();
-    setState(els.ch01, 'ok');
-    els.ch01Value.textContent = `${best.scheme}://${best.host}:${best.port}`;
-    els.ch01Meta.textContent = `类型 ${best.kind} · 来源 ${best.origin} · 已用 CONNECT / SOCKS5 握手验证`;
-    bar('armed', 'ARMED', '可以启动', `:${best.port} ${best.kind}`);
-  } else {
-    setState(els.nodeProxy, 'dead');
-    els.proxyKindReadout.textContent = '无可用端点';
-    setState(els.ch01, 'fail');
-    els.ch01Value.textContent = '没有任何候选端口通过握手';
-    els.ch01Meta.textContent = '确认代理客户端已启动；若端口非典型，请用「手动指定」';
-    bar('blocked', 'NO PROXY', '代理不可用', 'CH01 未通过，启动无意义');
-  }
-}
-
-function applyTarget(t) {
-  if (t.found) {
-    setState(els.ch02, 'ok');
-    els.ch02Value.textContent = t.path;
-    els.ch02Meta.textContent = `来源 ${t.source}${t.languageServer ? ' · 已确认 resources/bin/language_server' : ' · 未确认 language_server，可能不是标准安装'}`;
-  } else {
-    setState(els.ch02, 'fail');
-    els.ch02Value.textContent = '未定位到 Antigravity 可执行文件';
-    els.ch02Meta.textContent = '点「手动选择」指到 exe / .app 内层二进制，选择结果会记住';
-  }
-}
-
-function applyRunning(list) {
-  running = list || [];
-  if (!running.length) {
-    setState(els.ch03, 'ok');
-    els.ch03Value.textContent = '无残留实例';
-    els.ch03Meta.textContent = '干净状态，新进程会正确继承代理环境变量';
-    els.btnKill.hidden = true;
-    return;
-  }
-  setState(els.ch03, 'fail');
-  els.ch03Value.textContent = `检测到 ${running.length} 个实例 · PID ${running.map(r => r.pid).join(', ')}`;
-  els.ch03Meta.textContent = '环境变量无法注入已运行进程，必须完全退出后再启动';
-  els.btnKill.hidden = false;
-}
-
-window.launcher.onCandidate(c => {
-  const tag = c.loginOk ? 'ok' : c.kind === 'dead' ? 'err' : 'warn';
-  log(tag, `CH01 候选 ${c.endpoint} [${c.origin}] → ${c.kind}${c.loginOk ? ` · LOGIN 通 · MODELS ${c.modelOk ? '通' : '不通'}` : ` · ${c.detail}`}`);
-  if (c.loginOk && !best) {
-    best = c;
-    els.proxyReadout.textContent = `:${c.port}`;
-    els.proxyKindReadout.textContent = c.kind.toUpperCase();
-  }
-});
-
-els.btnKill.addEventListener('click', async () => {
-  log('warn', `终止残留实例 PID ${running.map(r => r.pid).join(', ')}`);
-  const left = await window.launcher.quitInstances(running.map(r => r.pid));
-  applyRunning(left);
-});
-
 $('btnRetarget').addEventListener('click', doProbe);
 $('btnChoose').addEventListener('click', async () => {
   const p = await window.launcher.chooseTarget();
-  if (p) { log('ok', `CH02 手动指定：${p}`); setState(els.ch02, 'ok'); els.ch02Value.textContent = p; }
+  if (p) { state.target = { found: true, path: p, source: 'manual', languageServer: null }; renderTarget(); }
+});
+els.btnKill.addEventListener('click', async () => {
+  state.running = (await window.launcher.quitInstances(state.running.map(r => r.pid))) || [];
+  renderRunning();
 });
 
 els.btnProxyManual.addEventListener('click', () => {
@@ -174,7 +332,6 @@ els.proxyApply.addEventListener('click', async () => {
   const v = els.proxyInput.value.trim();
   if (!v) return;
   await window.launcher.setProxy(v);
-  log('sys', `CH01 写入手动代理：${v}`);
   els.proxyForm.hidden = true;
   doProbe();
 });
@@ -182,60 +339,25 @@ els.proxyClear.addEventListener('click', async () => {
   await window.launcher.setProxy(null);
   els.proxyInput.value = '';
   els.proxyForm.hidden = true;
-  log('sys', 'CH01 已清除手动代理，恢复自动探测');
   doProbe();
 });
 els.proxyInput.addEventListener('keydown', e => { if (e.key === 'Enter') els.proxyApply.click(); });
 
-function doLaunch() {
-  if (running.length) {
-    bar('blocked', 'STALE INSTANCE', '先退出旧实例', 'CH03 有未注入代理的实例在跑');
-    log('err', 'CH03 阻塞：检测到残留实例，请先「终止残留实例」或手动完全退出');
-    return;
-  }
-  if (!best) {
-    bar('blocked', 'NO PROXY', '代理不可用', 'CH01 未通过握手验证');
-    log('err', 'CH01 阻塞：没有可用代理端点，启动只会复现直连失败');
-    return;
-  }
-  launchNow();
-}
-
-async function launchNow() {
-  bar('probing', 'LAUNCHING', '注入并启动中', `:${best.port} ${best.kind}`);
-  const r = await window.launcher.launch();
-  if (r.ok) {
-    bar('ok', 'LAUNCHED', `PID ${r.pid} 已启动`, `${r.endpoint} · ${r.kind}`);
-    setState(els.ch03, 'ok');
-    els.ch03Value.textContent = `已启动 PID ${r.pid}`;
-    els.ch03Meta.textContent = '子进程（language_server）继承同一份代理环境变量';
-    setTimeout(refreshProcessTree, 4000);
-  } else if (r.needsQuit) {
-    applyRunning(r.running);
-    bar('blocked', 'STALE INSTANCE', '先退出旧实例', r.error);
-  } else {
-    bar('blocked', 'FAILED', '启动失败', r.error || '未知错误');
-  }
-}
-
-async function refreshProcessTree() {
-  const res = await window.launcher.probe();
-  applyTarget(res.target);
-  applyRunning(res.running);
-  if (res.running.length) log('warn', `CH03 复查：PID ${res.running.map(x => x.pid).join(', ')}`);
-}
-
-(async function boot() {
-  const info = await window.launcher.boot();
-  document.body.className = `platform-${info.platform}`;
-  els.osChip.textContent = `${OS_LABEL[info.platform] || info.platform.toUpperCase()}`;
-  els.revChip.textContent = `REV ${info.appVersion}`;
-  if (info.config.proxyUrl) els.proxyInput.value = info.config.proxyUrl;
-  log('sys', `视口 ${window.innerWidth}×${window.innerHeight} CSS px · DPR ${window.devicePixelRatio} · 文档宽 ${document.documentElement.scrollWidth}`);
-  log('sys', 'Antigravity Launcher 就绪 — 只向进程树注入代理，不开 TUN，不改系统代理');
-  if (info.platform === 'win32') log('sys', '提示：Go 写的 language_server 只读环境变量，不读 Windows 注册表代理，这正是本工具存在的原因');
-  doProbe();
-})();
-
 document.querySelectorAll('.winctl button').forEach(b =>
   b.addEventListener('click', () => window.launcher.win(b.dataset.act)));
+
+/* --- boot ----------------------------------------------------------------- */
+
+(async function boot() {
+  applyTheme(localStorage.getItem(THEME_KEY) || 'auto');
+  applyLang(window.I18N.lang);
+  const info = await window.launcher.boot();
+  document.body.className = `platform-${info.platform} lang-${window.I18N.lang}`;
+  els.osChip.textContent = OS_LABEL[info.platform] || info.platform.toUpperCase();
+  els.revChip.textContent = `REV ${info.appVersion}`;
+  if (info.config.proxyUrl) els.proxyInput.value = info.config.proxyUrl;
+  pushLog('sys', 'log.ready');
+  pushLog('sys', 'log.viewport', { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, scrollW: document.documentElement.scrollWidth });
+  if (info.platform === 'win32') pushLog('sys', 'log.whyGo');
+  doProbe();
+})();
