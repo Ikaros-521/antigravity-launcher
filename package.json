@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "description": "Cross-platform process-local proxy launcher for Google Antigravity",
   "main": "src/main.js",
-  "author": "peroperoyui",
+  "author": {
+    "name": "Ikaros-521",
+    "email": "327209194@qq.com"
+  },
   "license": "MIT",
   "scripts": {
     "start": "electron .",

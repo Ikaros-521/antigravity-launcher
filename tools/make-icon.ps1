@@ -1,7 +1,11 @@
 Add-Type -AssemblyName System.Drawing
 
-$src = 'C:\Users\Administrator\Documents\Qoder\2026-10-26\ced5229b\vibe_images\antigravity-launcher-icon_1793008059113_7019d9b3.png'
-$outDir = 'E:\Github_Pro\antigravity-launcher\build'
+# Repo-relative so a clone can regenerate the icon set without editing paths.
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$src = Join-Path $repoRoot 'build\source\icon-source.png'
+$outDir = Join-Path $repoRoot 'build'
+$rawDir = Join-Path $outDir 'raw'
+New-Item -ItemType Directory -Force -Path $rawDir | Out-Null
 
 function New-RoundedIcon {
     param([int]$Size, [double]$CornerRadius, [double]$InsetRatio, $Source)
@@ -52,6 +56,15 @@ foreach ($s in 16, 24, 32, 48, 64, 128, 256, 512) {
     $g.Dispose()
     $srcImg.Dispose()
     $b.Save((Join-Path $outDir ("icon_{0}.png" -f $s)), [System.Drawing.Imaging.ImageFormat]::Png)
+
+    # Dump top-down BGRA so make-ico.js can build uncompressed DIB entries:
+    # makensis refuses PNG-compressed ICO payloads.
+    $rect = New-Object System.Drawing.Rectangle(0, 0, $s, $s)
+    $data = $b.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $bytes = New-Object byte[] ($data.Stride * $s)
+    [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
+    $b.UnlockBits($data)
+    [System.IO.File]::WriteAllBytes((Join-Path $rawDir ("{0}.bgra" -f $s)), $bytes)
     $b.Dispose()
 }
 
