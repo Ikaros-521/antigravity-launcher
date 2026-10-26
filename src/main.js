@@ -27,6 +27,21 @@ const winState = () => ({
   visible: !win.isMinimized() && win.isVisible() && !win.isDestroyed(),
 });
 
+// Windows only lets the process that received the last input event take the
+// foreground, so a double-clicked launcher — or the portable build's child
+// process, which the stub spawns and never owns — can come up behind. The
+// always-on-top toggle is the usual way to claim it without staying on top.
+function bringToForeground() {
+  if (!win || win.isDestroyed()) return;
+  if (win.isMinimized()) win.restore();
+  if (process.platform === 'win32') {
+    win.setAlwaysOnTop(true);
+    win.setAlwaysOnTop(false);
+    win.moveTop();
+  }
+  win.focus();
+}
+
 function createWindow() {
   const isMac = process.platform === 'darwin';
   win = new BrowserWindow({
@@ -52,7 +67,10 @@ function createWindow() {
     },
   });
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
-  win.once('ready-to-show', () => win.show());
+  win.once('ready-to-show', () => {
+    win.show();
+    bringToForeground();
+  });
 
   const pushState = () => emit('win-state', winState());
   const pushVisible = () => emit('visibility', winState());
@@ -162,10 +180,21 @@ ipcMain.on('win', (e, action) => {
   else if (action === 'fullscreen') win.setFullScreen(!win.isFullScreen());
 });
 
+// Without this, a second double-click starts a second instance whose window
+// can land behind the first, which reads as "it opened in the background".
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => bringToForeground());
+}
+
 app.whenReady().then(() => {
   cfg = new Config(app.getPath('userData'));
   createWindow();
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else bringToForeground();
+  });
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
