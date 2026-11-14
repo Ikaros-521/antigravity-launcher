@@ -62,6 +62,7 @@ const DICT = {
     'log.launched': '已启动 PID {pid}，注入 {ep}',
     'log.raised': 'CH03 抬窗结果：{msg}',
     'log.spawnFail': '启动失败：{msg}',
+    'log.earlyExit': '启动后立即退出（code {code}）：通常是有旧实例仍占用单实例锁',
     'log.killed': '已终止残留实例 PID {pids}',
     'log.manualTarget': 'CH02 手动指定：{path}',
     'log.manualProxy': 'CH01 写入手动代理：{url}',
@@ -96,6 +97,7 @@ const DICT = {
 
     'err.noTarget': '未定位到 Antigravity 可执行文件',
     'err.noProxy': '没有可用的本地代理端点',
+    'err.earlyExit': '启动后立即退出：Antigravity 可能已在运行，或被旧实例的单实例锁占用。请先完全退出 Antigravity 再重试',
     'err.stale': '必须先完全退出旧实例，环境变量无法注入已运行的进程',
     'err.blockedStale': 'CH03 阻塞：检测到残留实例，请先「终止残留实例」或手动完全退出',
     'err.blockedProxy': 'CH01 阻塞：没有可用代理端点，启动只会复现直连失败',
@@ -156,6 +158,7 @@ const DICT = {
     'log.launched': 'Started PID {pid} via {ep}',
     'log.raised': 'CH03 raise result: {msg}',
     'log.spawnFail': 'Launch failed: {msg}',
+    'log.earlyExit': 'Process exited immediately after launch (code {code}) — usually an old instance still holds the single-instance lock',
     'log.killed': 'Terminated stale instances PID {pids}',
     'log.manualTarget': 'CH02 set manually: {path}',
     'log.manualProxy': 'CH01 manual proxy set: {url}',
@@ -190,6 +193,7 @@ const DICT = {
 
     'err.noTarget': 'Antigravity executable not located',
     'err.noProxy': 'no usable local proxy endpoint',
+    'err.earlyExit': 'Exited right after launch: Antigravity may already be running, or an old instance holds the single-instance lock. Quit Antigravity completely and retry',
     'err.stale': 'quit the old instance first — env vars cannot be injected into a running process',
     'err.blockedStale': 'CH03 blocked: stale instance detected, quit it first',
     'err.blockedProxy': 'CH01 blocked: no usable proxy, launching would only reproduce direct-connection failure',
