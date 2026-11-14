@@ -17,7 +17,8 @@ const emit = (channel, payload) => { if (win && !win.isDestroyed()) win.webConte
 const log = (level, k, p) => emit('log', { level, k, p, ts: Date.now() });
 
 function resolveTarget() {
-  const saved = cfg.data.targetPath && detect.exists(cfg.data.targetPath) ? cfg.data.targetPath : null;
+  const saved = cfg.data.targetPath && detect.exists(cfg.data.targetPath)
+    && detect.isTargetCandidate(cfg.data.targetPath) ? cfg.data.targetPath : null;
   return saved ? detect.pack(saved, 'saved') : detect.detect();
 }
 
@@ -141,6 +142,10 @@ ipcMain.handle('launch', async () => {
   if (res.spawnError) {
     log('err', 'log.spawnFail', { msg: res.spawnError.message });
     return { ok: false, errKey: 'err.noProxy' };
+  }
+  if (res.earlyExit) {
+    log('err', 'log.earlyExit', { code: res.earlyExit.code });
+    return { ok: false, errKey: 'err.earlyExit', earlyExit: res.earlyExit, running: launch.listRunning(target.path) };
   }
   log('ok', 'log.launched', { pid: res.pid, ep: launch.redact(best) });
   return { ok: true, pid: res.pid, endpoint: launch.redact(best), kind: best.kind };

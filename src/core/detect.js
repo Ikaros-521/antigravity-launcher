@@ -30,12 +30,33 @@ function findFile(root, name, maxDepth) {
 
 // The language server ships next to the binary; its presence is what proves this
 // is a real Antigravity install rather than an unrelated same-named exe.
+// macOS keeps it at Contents/Resources/bin/language_server (no "app" segment).
 function languageServerFor(exePath) {
-  const root = process.platform === 'darwin'
-    ? path.join(path.dirname(path.dirname(exePath)), 'Resources', 'app')
-    : path.join(path.dirname(exePath), 'resources');
+  if (process.platform === 'darwin') {
+    const contents = path.dirname(path.dirname(exePath)); // .../Foo.app/Contents
+    const hits = [
+      path.join(contents, 'Resources', 'bin', 'language_server'),
+      path.join(contents, 'Resources', 'app', 'bin', 'language_server'),
+    ];
+    return hits.find(exists) || null;
+  }
+  const root = path.join(path.dirname(exePath), 'resources');
   const ls = path.join(root, 'bin', process.platform === 'win32' ? 'language_server.exe' : 'language_server');
   return exists(ls) ? ls : null;
+}
+
+// This launcher is itself an app called "Antigravity Launcher", which also
+// matches /antigrav/ when scanning the install dirs. Picking it as the target
+// makes the launcher re-exec itself; the copy then dies on the single-instance
+// lock before a window ever appears, so nothing opens and nothing is logged.
+const WRAPPER_NAME = /launcher|proxy/i;
+
+function isTargetCandidate(exePath) {
+  if (!exePath) return false;
+  if (process.platform !== 'darwin') return true;
+  // .../Foo.app/Contents/MacOS/Foo -> walk up three levels to reach "Foo.app".
+  const appName = path.basename(path.dirname(path.dirname(path.dirname(exePath))));
+  return !WRAPPER_NAME.test(appName);
 }
 
 function readMacBundleExec(appDir) {
@@ -52,11 +73,18 @@ function macCandidates() {
   const out = [];
   for (const d of dirs) {
     if (!fs.existsSync(d)) continue;
-    for (const name of fs.readdirSync(d)) {
+    let names;
+    try { names = fs.readdirSync(d); } catch { continue; }
+    for (const name of names) {
       if (!/antigrav/i.test(name)) continue;
+      if (WRAPPER_NAME.test(name)) continue; // never target our own bundle
       const app = path.join(d, name);
       const exec = path.join(app, 'Contents', 'MacOS', readMacBundleExec(app));
-      if (exists(exec)) out.push(exec);
+      if (!exists(exec)) continue;
+      // Second confirmation, same rule as the Windows scan: the real client
+      // ships the language server, a same-named wrapper does not.
+      if (!languageServerFor(exec) && name !== 'Antigravity.app') continue;
+      out.push(exec);
     }
   }
   return out;
@@ -111,9 +139,9 @@ function detect() {
   if (process.platform === 'darwin') {
     const hit = spawnSync('mdfind', ['kMDItemFSName == "Antigravity.app"'], { encoding: 'utf8', timeout: 4000 });
     const app = (hit.stdout || '').split('\n').map(s => s.trim()).find(Boolean);
-    if (app) {
+    if (app && !WRAPPER_NAME.test(path.basename(app))) {
       const exec = path.join(app, 'Contents', 'MacOS', readMacBundleExec(app));
-      if (exists(exec)) return pack(exec, 'auto:mdfind');
+      if (exists(exec) && isTargetCandidate(exec)) return pack(exec, 'auto:mdfind');
     }
   }
 
@@ -130,4 +158,4 @@ function pack(exePath, source) {
   };
 }
 
-module.exports = { detect, exists, pack };
+module.exports = { detect, exists, pack, isTargetCandidate };
