@@ -259,7 +259,7 @@ code { font-family: var(--font-mono); font-size: 10px; color: var(--amber); }
 /* launch bar --------------------------------------------------------------- */
 .launchbar {
   grid-area: launch; cursor: pointer; text-align: left; color: var(--ink);
-  display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 18px;
+  display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 18px;
   padding: 17px 22px; border-radius: var(--r-lg); transition: transform .12s;
 }
 .launchbar:hover { border-color: var(--amber); }
@@ -267,6 +267,18 @@ code { font-family: var(--font-mono); font-size: 10px; color: var(--amber); }
 .lb-key { font-size: 17px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase; }
 .lb-cn { font-size: 11px; letter-spacing: .26em; color: var(--ink-faint); }
 .lb-target { font-size: 10.5px; color: var(--ink-dim); text-align: right; white-space: nowrap; }
+/* pre-flight switch, lives inside the launch bar; clicking it must not launch */
+.pf-toggle {
+  -webkit-app-region: no-drag; display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  font: 500 9px var(--font-display); letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink-faint); background: var(--inset); border: 1px solid var(--line-strong);
+  border-radius: 999px; padding: 6px 11px; transition: .18s; user-select: none;
+}
+.pf-toggle i { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); transition: .18s; }
+.pf-toggle:hover { color: var(--ink); border-color: var(--ink-dim); }
+.pf-toggle[aria-checked="true"] { color: var(--green); border-color: var(--green); }
+.pf-toggle[aria-checked="true"] i { background: var(--green); box-shadow: 0 0 10px -1px var(--green); }
+.pf-toggle[aria-checked="true"]:hover { background: var(--green-soft); }
 .lb-sweep { position: absolute; inset: 0; z-index: 0; opacity: 0; pointer-events: none;
   background: linear-gradient(100deg, transparent 30%, var(--amber-soft) 50%, transparent 70%); }
 .launchbar:hover .lb-sweep { opacity: 1; animation: sweep 1.6s ease-in-out infinite; }

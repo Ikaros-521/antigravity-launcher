@@ -17,10 +17,12 @@ contextBridge.exposeInMainWorld('launcher', {
   openTerminal: type => ipcRenderer.invoke('open-terminal', { type }),
   getProxyCommands: () => ipcRenderer.invoke('get-proxy-commands'),
   setProxy: url => ipcRenderer.invoke('set-proxy', url),
+  setPreflight: on => ipcRenderer.invoke('set-preflight', on),
   openExternal: url => ipcRenderer.invoke('open-external', url),
   win: action => ipcRenderer.send('win', action),
   onLog: fn => on('log', fn),
   onCandidate: fn => on('probe:candidate', fn),
+  onLaunchStage: fn => on('launch:stage', fn),
   onVisibility: fn => on('visibility', fn),
   onWinState: fn => on('win-state', fn),
 });

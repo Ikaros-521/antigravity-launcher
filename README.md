@@ -45,7 +45,8 @@ Antigravity 不是一整个进程。真正发请求的是 `resources/bin/languag
 1. **定位客户端** — 扫描各平台常见安装目录，并用同目录下的 `resources/bin/language_server` 二次确认，避免认错同名程序。macOS 会读 `Info.plist` 的 `CFBundleExecutable` 拿到真实内层二进制。找不到就手动指定，结果会记住。
 2. **验证代理** — 先读系统代理（Windows 注册表 / macOS `scutil --proxy` / Linux `gsettings` + 环境变量），再扫常见本地端口。每个候选都要通过**真实握手**：同时尝试 HTTP CONNECT 和 SOCKS5，对 `accounts.google.com` 和 `daily-cloudcode-pa.googleapis.com` 两个目标分别验证，据此判定 `http` / `socks5` / `mixed` / `dead`。端口能连上不等于它是可用代理，这里不靠猜。域名交给代理解析，因为本机 DNS 正是被污染的一环。
 3. **检查残留实例** — 有未注入代理的实例在跑就亮红并给出终止按钮，不会假装启动成功。
-4. **启动** — 注入 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 及小写变体，附带 `--proxy-server` 把 Chromium 层也钉在同一端点，然后拉起进程。界面下方会预览将要写入的完整变量表。
+4. **前置校验（默认开启，可关闭）** — 启动前在同一代理上真实请求一次 `https://www.google.com/generate_204`（TLS 证书校验原样保留）。握手成功只证明本地代理"接受了请求"，不保证它真的能通到 Google——节点失效、订阅过期时照样能骗过握手探测。校验失败自动重试一次，仍不通就取消启动并说明原因；用启动条右侧的「校验」开关关闭。
+5. **启动** — 注入 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` 及小写变体，附带 `--proxy-server` 把 Chromium 层也钉在同一端点，然后拉起进程。界面下方会预览将要写入的完整变量表。
 
 `NO_PROXY` 固定包含 loopback。这不是可选项：Antigravity 的 UI 由本地 Go 服务在 `127.0.0.1` 提供，OAuth 回调也监听 localhost，代理接管回环地址会直接白屏。
 
@@ -53,7 +54,7 @@ Antigravity 不是一整个进程。真正发请求的是 `resources/bin/languag
 
 到 [Releases](https://github.com/Ikaros-521/antigravity-launcher/releases) 下载对应平台的安装包，装好直接运行即可，不需要装 Node。
 
-打开后自动完成探测，三条通道全绿即可点底部启动条。代理端口非典型时用「手动指定」填 `http://127.0.0.1:12345` 或 `socks5://127.0.0.1:12345`。
+打开后自动完成探测，三条通道全绿即可点底部启动条。代理端口非典型时用「手动指定」填 `http://127.0.0.1:12345` 或 `socks5://127.0.0.1:12345`。启动条右侧的「校验」开关控制启动前的 Google 可达性检查（默认开启，选择会记住）。
 
 macOS 首次打开需要手动放行一次，见 [Gatekeeper](#macos-放行--gatekeeper)。
 

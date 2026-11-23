@@ -1,9 +1,13 @@
 const net = require('net');
 const http = require('http');
+const tls = require('tls');
 const { spawnSync } = require('child_process');
 
 const LOGIN_TARGET = { host: 'accounts.google.com', port: 443 };
 const MODEL_TARGET = { host: 'daily-cloudcode-pa.googleapis.com', port: 443 };
+// What the pre-flight gate asks for. generate_204 is the endpoint proxy clients
+// test their own nodes against: a fixed status and no body to transfer.
+const PREFLIGHT_TARGET = { host: 'www.google.com', port: 443, path: '/generate_204' };
 
 const PING_TARGETS = [
   { host: 'accounts.google.com', port: 443, id: 'google', label: 'Google' },
@@ -42,24 +46,66 @@ function parseProxyUrl(input, fallbackScheme) {
 
 // --- probes -----------------------------------------------------------------
 
-function httpConnect(ep, target, timeout = 3500) {
+// Offset just past an HTTP reply head; -1 while the head is still incomplete.
+function headEnd(buf) {
+  const i = buf.indexOf('\r\n\r\n');
+  if (i !== -1) return i + 4;
+  const j = buf.indexOf('\n\n');
+  return j === -1 ? -1 : j + 2;
+}
+
+// Before a tunnel changes hands its handshake listeners have to go: left in
+// place they would read TLS traffic as more proxy reply. Pausing matters: a
+// flowing socket with no 'data' listener drops incoming bytes, and bytes that
+// were read into the JS buffer are skipped by tls.connect() entirely — only a
+// paused socket hands both buffered and future bytes to the TLS layer. The
+// no-op error sink stays, because an 'error' nobody listens to takes the
+// process down.
+function handOver(sock) {
+  sock.setTimeout(0);
+  sock.pause();
+  sock.removeAllListeners('data');
+  sock.removeAllListeners('timeout');
+  sock.removeAllListeners('close');
+  sock.removeAllListeners('error');
+  sock.on('error', () => {});
+}
+
+// Every handshake fails the same way on socket events, so none of them can be
+// left pending: a closed socket never fires 'timeout', so a peer that hangs up
+// mid-reply has to be reported from 'close'.
+function watch(sock, fail) {
+  sock.on('error', () => fail('socket error'));
+  sock.on('timeout', () => fail('timeout'));
+  sock.on('close', () => fail('connection closed'));
+}
+
+// Each handshake resolves with { sock, rest, reason, rtt }: the tunnel left
+// open, plus any bytes that trailed the reply inside it. It rejects with an
+// Error whose message is the verdict's reason. The *Connect probes hang up at
+// once; httpsOverProxy keeps the tunnel and runs TLS over it.
+function httpTunnel(ep, target, timeout) {
   const t0 = Date.now();
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     const sock = net.connect({ host: ep.host, port: ep.port, timeout });
     let buf = '';
-    const done = ok => {
+    const fail = reason => {
       sock.destroy();
-      resolve({ ...ok, rtt: Date.now() - t0 });
+      reject(Object.assign(new Error(reason), { rtt: Date.now() - t0 }));
     };
-    sock.on('error', () => done({ ok: false, reason: 'socket error' }));
-    sock.on('timeout', () => done({ ok: false, reason: 'timeout' }));
+    watch(sock, fail);
     sock.on('data', chunk => {
       buf += chunk.toString('latin1');
-      if (!buf.includes('\r\n\r\n') && !buf.includes('\n\n')) return;
+      const cut = headEnd(buf);
+      if (cut === -1) return;
       const status = buf.match(/HTTP\/\d(?:\.\d)?\s+(\d{3})/i);
-      done(status
-        ? { ok: status[1] === '200', reason: `CONNECT ${status[1]}` }
-        : { ok: false, reason: 'non-HTTP response (not an HTTP proxy?)' });
+      if (!status) return fail('non-HTTP response (not an HTTP proxy?)');
+      if (status[1] !== '200') return fail(`CONNECT ${status[1]}`);
+      handOver(sock);
+      resolve({
+        sock, rest: Buffer.from(buf.slice(cut), 'latin1'),
+        reason: `CONNECT ${status[1]}`, rtt: Date.now() - t0,
+      });
     });
     const auth = ep.user ? `\r\nProxy-Authorization: Basic ${Buffer.from(`${ep.user}:${ep.pass || ''}`).toString('base64')}` : '';
     sock.write(`CONNECT ${target.host}:${target.port} HTTP/1.1\r\nHost: ${target.host}:${target.port}${auth}\r\n\r\n`);
@@ -67,16 +113,15 @@ function httpConnect(ep, target, timeout = 3500) {
 }
 
 // Sends the domain, not a resolved IP: local DNS is exactly what is poisoned here.
-function socks5Connect(ep, target, timeout = 3500) {
+function socks5Tunnel(ep, target, timeout) {
   const t0 = Date.now();
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     const sock = net.connect({ host: ep.host, port: ep.port, timeout });
-    const done = ok => {
+    const fail = reason => {
       sock.destroy();
-      resolve({ ...ok, rtt: Date.now() - t0 });
+      reject(Object.assign(new Error(reason), { rtt: Date.now() - t0 }));
     };
-    sock.on('error', () => done({ ok: false, reason: 'socket error' }));
-    sock.on('timeout', () => done({ ok: false, reason: 'timeout' }));
+    watch(sock, fail);
     const greeting = Buffer.from([0x05, 0x01, 0x00]);
     const hostBuf = Buffer.from(target.host, 'utf8');
     const req = Buffer.concat([
@@ -92,22 +137,37 @@ function socks5Connect(ep, target, timeout = 3500) {
         if (acc.length < 2) return;
         if (acc[0] !== 0x05 || acc[1] !== 0x00) {
           const isHttpReply = acc[0] === 0x48 /* H */;
-          return done({
-            ok: false,
-            reason: isHttpReply ? 'answered HTTP, not SOCKS5' : `SOCKS5 greeting rejected (05 ${acc[1]})`,
-          });
+          return fail(isHttpReply ? 'answered HTTP, not SOCKS5' : `SOCKS5 greeting rejected (05 ${acc[1]})`);
         }
         phase = 1; acc = Buffer.alloc(0); sock.write(req); return;
       }
       if (acc.length < 4) return;
       const rep = acc[1];
-      done(rep === 0x00
-        ? { ok: true, reason: 'SOCKS5 CONNECT 00' }
-        : { ok: false, reason: `SOCKS5 reply code ${rep}` });
+      if (rep !== 0x00) return fail(`SOCKS5 reply code ${rep}`);
+      // 4 header bytes, then BND.ADDR (its length follows its type) and BND.PORT.
+      const atyp = acc[3];
+      const end = atyp === 0x01 ? 10 : atyp === 0x04 ? 22 : atyp === 0x03 ? 7 + (acc[4] || 0) : 4;
+      if (acc.length < end) return;
+      handOver(sock);
+      resolve({ sock, rest: acc.subarray(end), reason: 'SOCKS5 CONNECT 00', rtt: Date.now() - t0 });
     });
     sock.write(greeting);
   });
 }
+
+// The verdict the scan and the ping lanes want: handshake, hang up, report.
+async function probeTunnel(open, ep, target, timeout) {
+  try {
+    const tun = await open(ep, target, timeout);
+    tun.sock.destroy();
+    return { ok: true, reason: tun.reason, rtt: tun.rtt };
+  } catch (err) {
+    return { ok: false, reason: err.message, rtt: err.rtt };
+  }
+}
+
+const httpConnect = (ep, target, timeout = 3500) => probeTunnel(httpTunnel, ep, target, timeout);
+const socks5Connect = (ep, target, timeout = 3500) => probeTunnel(socks5Tunnel, ep, target, timeout);
 
 async function classify(ep, timeout = 2500) {
   const [httpLogin, socksLogin] = await Promise.all([
@@ -263,6 +323,72 @@ async function pingTargets(ep, timeout = 3500) {
   }));
 }
 
+// --- pre-flight check -------------------------------------------------------
+
+// A CONNECT / SOCKS5 success only proves the local proxy accepted the request:
+// clients answer 200 before, or regardless of, dialling upstream. This is the
+// claim a launch needs — a certificate-verified HTTPS reply from the target,
+// read through the same tunnel Antigravity would be handed. Nothing about TLS
+// is relaxed, so a hijacked or blackholed route fails rather than passes.
+// Resolves with { status, ms }, rejects with an Error whose message is the reason.
+async function httpsOverProxy(ep, target, timeout = 6000) {
+  const t0 = Date.now();
+  const { sock, rest } = await (ep.kind === 'socks5' ? socks5Tunnel : httpTunnel)(ep, target, timeout);
+  // One deadline covers the handshake and the request.
+  const left = Math.max(timeout - (Date.now() - t0), 500);
+
+  return new Promise((resolve, reject) => {
+    if (rest.length) sock.unshift(rest);
+    const secure = tls.connect({ socket: sock, servername: target.host });
+    let settled = false;
+    let head = '';
+    const fail = reason => {
+      if (settled) return;
+      settled = true;
+      secure.destroy();
+      reject(new Error(reason));
+    };
+    // TLS does not surface every failure of the socket underneath it.
+    sock.on('error', () => fail('socket error'));
+    secure.setTimeout(left);
+    secure.on('error', err => fail(err.code || 'socket hang up'));
+    secure.on('timeout', () => fail('timeout'));
+    secure.on('close', () => fail('connection closed'));
+    secure.once('secureConnect', () => {
+      secure.write(`GET ${target.path} HTTP/1.1\r\nHost: ${target.host}\r\nConnection: close\r\n\r\n`);
+    });
+    secure.on('data', chunk => {
+      head += chunk.toString('latin1');
+      if (!head.includes('\n')) return;
+      const status = head.match(/^HTTP\/\d(?:\.\d)?\s+(\d{3})/);
+      // A 4xx still came from the site; a 5xx is no evidence of a working route.
+      if (!status) return fail('non-HTTP response');
+      if (Number(status[1]) >= 500) return fail(`HTTP ${status[1]}`);
+      settled = true;
+      secure.destroy();
+      resolve({ status: Number(status[1]), ms: Date.now() - t0 });
+    });
+  });
+}
+
+// The gate itself. Two tries, so a single dropped packet cannot ground the
+// launch; each try gets a fresh tunnel.
+async function checkGoogle(ep, { attempts = 2, timeout = 6000, onAttempt } = {}) {
+  let reason = 'not attempted';
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const { status, ms } = await httpsOverProxy(ep, PREFLIGHT_TARGET, timeout);
+      const out = { ok: true, attempt, attempts, status, ms };
+      if (onAttempt) onAttempt(out);
+      return out;
+    } catch (err) {
+      reason = err.message;
+      if (onAttempt) onAttempt({ ok: false, attempt, attempts, reason });
+    }
+  }
+  return { ok: false, attempts, reason };
+}
+
 // --- IP queries -------------------------------------------------------------
 
 function queryJsonOverHttp(options, timeout = 4000) {
@@ -368,5 +494,6 @@ async function fetchIpInfo(ep) {
 module.exports = {
   scan, classify, buildCandidates, parseProxyUrl,
   httpConnect, socks5Connect, pingTargets, fetchIpInfo,
-  LOGIN_TARGET, MODEL_TARGET, PING_TARGETS, DEFAULT_CANDIDATES,
+  httpsOverProxy, checkGoogle,
+  LOGIN_TARGET, MODEL_TARGET, PING_TARGETS, DEFAULT_CANDIDATES, PREFLIGHT_TARGET,
 };

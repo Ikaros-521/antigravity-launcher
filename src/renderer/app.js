@@ -19,6 +19,7 @@ const els = {
   proxyForm: $('proxyForm'), proxyInput: $('proxyInput'),
   proxyApply: $('proxyApply'), proxyClear: $('proxyClear'),
   launchBar: $('launchBar'), lbKey: $('lbKey'), lbCn: $('lbCn'), lbTarget: $('lbTarget'),
+  preflightToggle: $('preflightToggle'),
   consoleBody: $('consoleBody'), envGrid: $('envGrid'),
   plateCn: $('plateCn'), btnMax: $('btnMax'), btnFull: $('btnFull'),
 };
@@ -491,7 +492,20 @@ async function launchNow() {
   renderBar();
 }
 
+// The main process walks the launch in stages; the bar narrates each one.
+window.launcher.onLaunchStage(stage => {
+  if (!state.best) return;
+  state.bar = { phase: 'launching', params: { target: stage === 'preflight' ? t('bar.preflight') : t('bar.spawning') } };
+  renderBar();
+});
+
 els.launchBar.addEventListener('click', doLaunch);
+els.preflightToggle.addEventListener('click', async e => {
+  e.stopPropagation();
+  const next = els.preflightToggle.getAttribute('aria-checked') !== 'true';
+  els.preflightToggle.setAttribute('aria-checked', String(next));
+  await window.launcher.setPreflight(next);
+});
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && document.activeElement === document.body) doLaunch();
 });
@@ -551,6 +565,7 @@ document.querySelectorAll('.winctl button').forEach(b =>
   els.osChip.textContent = OS_LABEL[info.platform] || info.platform.toUpperCase();
   els.revChip.textContent = `REV ${info.appVersion}`;
   if (info.config.proxyUrl) els.proxyInput.value = info.config.proxyUrl;
+  els.preflightToggle.setAttribute('aria-checked', String(info.config.preflight !== false));
   renderAdaptiveButtons();
   pushLog('sys', 'log.ready');
   pushLog('sys', 'log.viewport', { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, scrollW: document.documentElement.scrollWidth });

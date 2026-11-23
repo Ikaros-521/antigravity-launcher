@@ -138,6 +138,20 @@ ipcMain.handle('launch', async () => {
   if (!best) return { ok: false, errKey: 'err.noProxy' };
   lastBestProxy = best;
 
+  if (cfg.data.preflight) {
+    emit('launch:stage', 'preflight');
+    const check = await proxy.checkGoogle(best, {
+      onAttempt: a => { if (!a.ok) log('warn', 'log.preflightTry', { n: a.attempt, reason: a.reason }); },
+    });
+    log(check.ok ? 'ok' : 'err', check.ok ? 'log.preflightOk' : 'log.preflightFail',
+      check.ok ? { ep: launch.redact(best), status: check.status, ms: check.ms }
+        : { ep: launch.redact(best), reason: check.reason });
+    if (!check.ok) return { ok: false, errKey: 'err.googleUnreachable', reason: check.reason };
+  } else {
+    log('sys', 'log.preflightSkip');
+  }
+  emit('launch:stage', 'spawning');
+
   const res = await launch.launch(best, target.path, msg => log('sys', 'log.raised', { msg }));
   if (res.spawnError) {
     log('err', 'log.spawnFail', { msg: res.spawnError.message });
@@ -248,6 +262,12 @@ ipcMain.handle('set-proxy', (e, url) => {
   lastBestProxy = null;
   log('ok', url ? 'log.manualProxy' : 'log.clearedProxy', url && { url });
   return cfg.data;
+});
+
+ipcMain.handle('set-preflight', (e, on) => {
+  cfg.set({ preflight: !!on });
+  log('ok', on ? 'log.preflightOn' : 'log.preflightOff');
+  return cfg.data.preflight;
 });
 
 ipcMain.handle('open-external', (e, url) => {
