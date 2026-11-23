@@ -23,7 +23,7 @@ jobs:
             args: --win
           - os: ubuntu-22.04
             args: --linux
-          - os: macos-14
+          - os: macos-15
             args: --mac
     runs-on: ${{ matrix.os }}
     steps:
