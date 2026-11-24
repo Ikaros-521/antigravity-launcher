@@ -158,4 +158,49 @@ function pack(exePath, source) {
   };
 }
 
-module.exports = { detect, exists, pack, isTargetCandidate };
+// --- the terminal CLI (agy) --------------------------------------------------
+
+const CLI_EXE = process.platform === 'win32' ? 'agy.exe' : 'agy';
+
+function cliCandidates() {
+  const la = process.env.LOCALAPPDATA || '';
+  const home = process.env.HOME || process.env.USERPROFILE || '';
+  const out = [
+    path.join(la, 'agy', 'bin', CLI_EXE),
+    path.join(home, '.agy', 'bin', CLI_EXE),
+    path.join(home, '.local', 'bin', CLI_EXE),
+  ];
+  if (process.platform !== 'win32') out.push(path.join('/usr/local/bin', CLI_EXE));
+  return out;
+}
+
+// The CLI also supports `agy install`, which may have put itself on PATH
+// somewhere outside the usual folders; trust the shell before giving up.
+function cliOnPath() {
+  const lookup = process.platform === 'win32'
+    ? spawnSync('where', [CLI_EXE], { encoding: 'utf8', timeout: 4000 })
+    : spawnSync('sh', ['-c', `command -v ${CLI_EXE}`], { encoding: 'utf8', timeout: 4000 });
+  const hit = (lookup.stdout || '').split('\n').map(s => s.trim()).find(Boolean);
+  return hit && exists(hit) ? hit : null;
+}
+
+function detectCli() {
+  for (const c of cliCandidates()) {
+    if (c && exists(c)) return packCli(c, 'auto:known-location');
+  }
+  const onPath = cliOnPath();
+  if (onPath) return packCli(onPath, 'auto:path');
+  return { found: false, path: null, kind: 'cli' };
+}
+
+function packCli(exePath, source) {
+  return {
+    found: true,
+    path: fs.realpathSync(exePath),
+    source,
+    kind: 'cli',
+    processName: CLI_EXE,
+  };
+}
+
+module.exports = { detect, exists, pack, isTargetCandidate, detectCli, packCli, CLI_EXE };

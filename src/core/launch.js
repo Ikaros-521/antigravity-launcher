@@ -1,32 +1,65 @@
-const { spawn, spawnSync } = require('child_process');
+const { spawn, spawnSync, execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
 // The launcher's own executable is named "Antigravity Launcher.exe" /
-// "Antigravity.Launcher-*.exe", so a prefix match on "antigravity" would
-// report the launcher as a stale Antigravity instance — and then kill it.
-function listRunning(targetPath) {
-  const base = (targetPath ? path.basename(targetPath) : 'Antigravity').toLowerCase();
-  const isTarget = name => name.toLowerCase() === base;
-  const self = process.pid;
+// "Antigravity.Launcher-*.exe", so only an exact name match keeps the launcher
+// from being reported as a stale Antigravity instance — and then killed.
 
+const isCliName = name => /^agy(\.exe)?$/i.test(name);
+
+function parseProcessList(text) {
   if (process.platform === 'win32') {
-    const r = spawnSync('tasklist', ['/FO', 'CSV', '/NH'], { encoding: 'utf8' });
-    return (r.stdout || '').split('\n').map(line => {
+    return text.split('\n').map(line => {
       const m = line.match(/^"([^"]+)","(\d+)"/);
-      if (!m) return null;
-      const pid = Number(m[2]);
-      return isTarget(m[1]) && pid !== self ? { name: m[1], pid } : null;
+      return m ? { name: m[1], pid: Number(m[2]) } : null;
     }).filter(Boolean);
   }
-  const r = spawnSync('ps', ['-axo', 'pid=,comm='], { encoding: 'utf8' });
-  return (r.stdout || '').split('\n').map(line => {
+  return text.split('\n').map(line => {
     const m = line.trim().match(/^(\d+)\s+(.+)$/);
-    if (!m) return null;
-    const pid = Number(m[1]);
-    const name = path.basename(m[2]);
-    return isTarget(name) && pid !== self ? { name, pid } : null;
+    return m ? { name: path.basename(m[2]), pid: Number(m[1]) } : null;
   }).filter(Boolean);
+}
+
+// One read of the process table answers every "is it running" question. It is
+// async because CH03 polls it: a synchronous tasklist would stall the main
+// thread, and with it the window, on every tick.
+function listProcesses() {
+  const [cmd, args] = process.platform === 'win32'
+    ? ['tasklist', ['/FO', 'CSV', '/NH']]
+    : ['ps', ['-axo', 'pid=,comm=']];
+  return new Promise(resolve => {
+    execFile(cmd, args, { windowsHide: true, timeout: 8000, maxBuffer: 8 * 1024 * 1024 }, (_err, stdout) => {
+      resolve(parseProcessList(String(stdout || '')));
+    });
+  });
+}
+
+// Instances of the desktop client. A CLI path has nothing to report here: its
+// sessions belong to the user's terminals and are never stale instances.
+function pickRunning(list, targetPath) {
+  const base = (targetPath ? path.basename(targetPath) : 'Antigravity').toLowerCase();
+  if (isCliName(base)) return [];
+  const isTarget = name => name.toLowerCase() === base;
+  return list.filter(p => isTarget(p.name) && p.pid !== process.pid);
+}
+
+// agy sessions are plain information for the CLI tab, never something to quit.
+const pickCliSessions = list => list.filter(p => isCliName(p.name));
+
+// Windows hands out process IDs again readily, so a recorded PID only counts
+// as "the client this launcher started" once its start time matches the
+// record. Resolves to epoch milliseconds, or null when it cannot be read.
+function processStartEpoch(pid) {
+  if (process.platform !== 'win32' || !Number.isInteger(pid) || pid <= 0) return Promise.resolve(null);
+  const script = `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p) { ([DateTimeOffset]$p.StartTime.ToUniversalTime()).ToUnixTimeMilliseconds() }`;
+  return new Promise(resolve => {
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script],
+      { windowsHide: true, timeout: 15000 }, (_err, stdout) => {
+        const ms = Number(String(stdout || '').trim());
+        resolve(ms > 0 ? ms : null);
+      });
+  });
 }
 
 function killInstances(pids) {
@@ -261,7 +294,7 @@ function raiseWindow(pid, appName, onResult) {
   }
 }
 
-async function launch(ep, targetPath, onRaise) {
+async function launch(ep, targetPath, onRaise, onSpawn) {
   const env = { ...process.env, ...buildEnv(ep) };
   const args = [
     `--proxy-server=http://${ep.host}:${ep.port}`,
@@ -276,6 +309,9 @@ async function launch(ep, targetPath, onRaise) {
     // inherits it for its first window, so the UI never appears at all.
     windowsHide: false,
   });
+  // The caller learns the pid at once, so CH03 can show the instance from the
+  // moment it exists rather than after the settle delays below.
+  if (onSpawn && child.pid) onSpawn(child.pid);
   let spawnError = null;
   let exitInfo = null;
   child.on('error', err => { spawnError = err; });
@@ -297,17 +333,21 @@ async function launch(ep, targetPath, onRaise) {
   return { pid: child.pid, spawnError: null };
 }
 
-function openTerminal({ type = 'powershell', workDir, ep }) {
+function openTerminal({ type = 'powershell', workDir, ep, runCommand }) {
   const validDir = workDir && fs.existsSync(workDir) ? workDir : (process.env.USERPROFILE || process.env.HOME || process.cwd());
   const env = { ...process.env, ...(ep ? buildEnv(ep) : {}) };
+  // An optional command runs after the env is set, so the terminal opens
+  // straight into e.g. the agy CLI instead of a bare prompt.
+  const run = cmd => (runCommand ? `${cmd} && ` : '');
 
   if (process.platform === 'win32') {
     if (type === 'cmd') {
       const http = ep ? urlFor(ep, 'http') : '';
       const socks = ep ? urlFor(ep, 'socks5') : '';
+      const tail = runCommand ? ` && "${runCommand}"` : '';
       const cmdScript = ep
-        ? `cd /d "${validDir}" && set "HTTP_PROXY=${http}" && set "HTTPS_PROXY=${http}" && set "ALL_PROXY=${socks}" && set "NO_PROXY=localhost,127.0.0.1,::1" && echo [AGY] Proxy environment set -> ${http}`
-        : `cd /d "${validDir}" && echo [AGY] Terminal ready`;
+        ? `cd /d "${validDir}" && set "HTTP_PROXY=${http}" && set "HTTPS_PROXY=${http}" && set "ALL_PROXY=${socks}" && set "NO_PROXY=localhost,127.0.0.1,::1" && echo [AGY] Proxy environment set -> ${http}${tail}`
+        : `cd /d "${validDir}" && echo [AGY] Terminal ready${tail}`;
       const child = spawn('cmd.exe', ['/c', 'start', '""', 'cmd.exe', '/K', cmdScript], {
         cwd: validDir,
         env,
@@ -321,9 +361,10 @@ function openTerminal({ type = 'powershell', workDir, ep }) {
       // powershell
       const http = ep ? urlFor(ep, 'http') : '';
       const socks = ep ? urlFor(ep, 'socks5') : '';
+      const tail = runCommand ? `; & '${runCommand}'` : '';
       const psScript = ep
-        ? `Set-Location '${validDir}'; $env:HTTP_PROXY='${http}'; $env:HTTPS_PROXY='${http}'; $env:ALL_PROXY='${socks}'; $env:NO_PROXY='localhost,127.0.0.1,::1'; Write-Host '[AGY] Proxy environment set -> ${http}' -ForegroundColor Cyan`
-        : `Set-Location '${validDir}'; Write-Host '[AGY] Terminal ready' -ForegroundColor Yellow`;
+        ? `Set-Location '${validDir}'; $env:HTTP_PROXY='${http}'; $env:HTTPS_PROXY='${http}'; $env:ALL_PROXY='${socks}'; $env:NO_PROXY='localhost,127.0.0.1,::1'; Write-Host '[AGY] Proxy environment set -> ${http}' -ForegroundColor Cyan${tail}`
+        : `Set-Location '${validDir}'; Write-Host '[AGY] Terminal ready' -ForegroundColor Yellow${tail}`;
       const child = spawn('cmd.exe', ['/c', 'start', '""', 'powershell.exe', '-NoExit', '-Command', psScript], {
         cwd: validDir,
         env,
@@ -341,7 +382,8 @@ function openTerminal({ type = 'powershell', workDir, ep }) {
     const envExports = ep
       ? `export HTTP_PROXY="${http}" && export HTTPS_PROXY="${http}" && export ALL_PROXY="${socks}" && export NO_PROXY="localhost,127.0.0.1,::1" && `
       : '';
-    const script = `tell application "Terminal" to do script "cd '${validDir}' && ${envExports}echo '[AGY] Proxy environment set'"` ;
+    const tail = runCommand ? ` && '${runCommand}'` : '';
+    const script = `tell application "Terminal" to do script "cd '${validDir}' && ${envExports}echo '[AGY] Proxy environment set'${tail}"` ;
     spawn('osascript', ['-e', script], { detached: true, stdio: 'ignore' }).unref();
     return { ok: true, dir: validDir };
   } else {
@@ -351,14 +393,15 @@ function openTerminal({ type = 'powershell', workDir, ep }) {
     const envExports = ep
       ? `export HTTP_PROXY="${http}"; export HTTPS_PROXY="${http}"; export ALL_PROXY="${socks}"; `
       : '';
-    const child = spawn('x-terminal-emulator', ['-e', `bash -c "cd '${validDir}'; ${envExports}echo '[AGY] Proxy environment set'; exec bash"`], {
+    const tail = runCommand ? `; '${runCommand}'` : '';
+    const child = spawn('x-terminal-emulator', ['-e', `bash -c "cd '${validDir}'; ${envExports}echo '[AGY] Proxy environment set'${tail}; exec bash"`], {
       cwd: validDir,
       env,
       detached: true,
       stdio: 'ignore',
     });
     child.on('error', () => {
-      spawn('gnome-terminal', ['--', 'bash', '-c', `cd '${validDir}'; ${envExports}echo '[AGY] Proxy environment set'; exec bash`], {
+      spawn('gnome-terminal', ['--', 'bash', '-c', `cd '${validDir}'; ${envExports}echo '[AGY] Proxy environment set'${tail}; exec bash`], {
         cwd: validDir,
         env,
         detached: true,
@@ -370,4 +413,15 @@ function openTerminal({ type = 'powershell', workDir, ep }) {
   }
 }
 
-module.exports = { listRunning, killInstances, buildEnv, buildProxyCommands, openTerminal, launch, urlFor, redact, raiseWindow };
+// The CLI cannot be spawned headlessly: it is an interactive session and its
+// output belongs in the user's terminal. Launching it therefore means opening
+// a proxy-injected terminal that drops straight into agy.
+function launchCli(ep, cliPath, { type, workDir } = {}) {
+  const t = type || (process.platform === 'win32' ? 'powershell' : 'terminal');
+  return openTerminal({ type: t, workDir, ep, runCommand: cliPath });
+}
+
+module.exports = {
+  listProcesses, pickRunning, pickCliSessions, processStartEpoch,
+  killInstances, buildEnv, buildProxyCommands, openTerminal, launchCli, launch, urlFor, redact, raiseWindow,
+};

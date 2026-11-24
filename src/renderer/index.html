@@ -83,7 +83,13 @@
   </section>
 
   <main class="channels">
-    <div class="etiquette">CHANNELS<span class="cn" data-i18n="g.channels">／ 通道</span></div>
+    <div class="channels-head">
+      <div class="etiquette">CHANNELS<span class="cn" data-i18n="g.channels">／ 通道</span></div>
+      <span class="seg tab-seg" id="targetSeg" role="group" data-i18n-title="tip.target">
+        <span role="button" tabindex="0" data-target="desktop" data-i18n="target.desktop">桌面版</span>
+        <span role="button" tabindex="0" data-target="cli">CLI</span>
+      </span>
+    </div>
 
     <article class="channel glass" id="ch01" data-state="idle">
       <div class="ch-id"><b>CH01</b><span data-i18n="role.ch01">代理端点</span></div>
@@ -112,6 +118,7 @@
       </div>
       <div class="ch-acts">
         <button type="button" class="btn ghost" id="btnChoose" data-i18n="choose">手动选择</button>
+        <button type="button" class="btn ghost" id="btnChooseCli" data-i18n="chooseCli" data-i18n-title="tip.chooseCli">选择 CLI</button>
       </div>
     </article>
 

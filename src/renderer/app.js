@@ -14,6 +14,7 @@ const els = {
   ch01: $('ch01'), ch01Value: $('ch01Value'), ch01Meta: $('ch01Meta'),
   ch02: $('ch02'), ch02Value: $('ch02Value'), ch02Meta: $('ch02Meta'),
   ch03: $('ch03'), ch03Value: $('ch03Value'), ch03Meta: $('ch03Meta'),
+  btnChoose: $('btnChoose'), btnChooseCli: $('btnChooseCli'), targetSeg: $('targetSeg'),
   btnKill: $('btnKill'), btnProxyManual: $('btnProxyManual'),
   copyBar: $('copyBar'),
   proxyForm: $('proxyForm'), proxyInput: $('proxyInput'),
@@ -40,18 +41,28 @@ function maskIp(ip) {
   return ip.length > 7 ? `${ip.slice(0, 3)}****${ip.slice(-3)}` : '****';
 }
 
-/* Single source of truth so a language switch can repaint everything. */
+/* Two parallel launch targets, desktop client and terminal CLI. CH01 (the
+   proxy endpoint) is a fact about the machine and shared by both; everything
+   else — binary, process tree, launch state — is per target, so each side can
+   be started and relaunched without disturbing the other. */
+const idleBar = { phase: 'idle', params: {} };
 const state = {
   platform: 'win32',
-  best: null, target: null, running: [],
+  best: null,
+  profiles: {
+    desktop: { target: null, running: [], launchedPid: null, bar: { ...idleBar, params: {} } },
+    cli: { target: null, sessions: [], own: [], bar: { ...idleBar, params: {} } },
+  },
+  tab: 'desktop',
   ipInfo: { direct: null, proxy: null },
   pings: [],
   diagnosing: false,
   ipMasked: localStorage.getItem('agy.ipMasked') !== 'false', // 默认隐藏，防截图泄露
-  bar: { phase: 'idle', params: {} },
   probing: false,
   logs: [],
 };
+const cur = () => state.profiles[state.tab];
+let statusBusy = false;
 
 const OS_LABEL = { win32: 'WINDOWS', darwin: 'MACOS', linux: 'LINUX' };
 const url = ep => ep && `${ep.scheme}://${ep.host}:${ep.port}`;
@@ -127,6 +138,8 @@ function setPaused(v) {
   if (paused) {
     if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
     pending.clear();
+  } else {
+    refreshStatus(); // a hidden window skips the poll, so catch up on return
   }
 }
 window.launcher.onVisibility(({ visible }) => setPaused(!visible));
@@ -173,13 +186,14 @@ window.launcher.onLog(e => pushLog(e.level, e.k, e.p));
 function setState(el, s) { if (el) el.dataset.state = s; }
 
 function renderBar() {
-  const { phase, params } = state.bar;
+  const { phase, params } = cur().bar;
+  const cli = state.tab === 'cli';
   const map = {
     idle: ['idle', 'idle.key', 'idle.cn', 'idle.target'],
     probing: ['probing', 'scanning.key', 'scanning.cn', 'scanning.target'],
     armed: ['armed', 'armed.key', 'armed.cn', null],
-    launching: ['probing', 'launching.key', 'launching.cn', null],
-    launched: ['ok', 'launched.key', 'launched.cn', null],
+    launching: ['probing', 'launching.key', cli ? 'launching.cli.cn' : 'launching.cn', null],
+    launched: ['ok', 'launched.key', cli ? 'launched.cli.cn' : 'launched.cn', null],
     stale: ['blocked', 'stale.key', 'stale.cn', null],
     noproxy: ['blocked', 'noproxy.key', 'noproxy.cn', null],
     failed: ['blocked', 'failed.key', 'failed.cn', null],
@@ -187,7 +201,7 @@ function renderBar() {
   const [ds, kKey, kCn, kTarget] = map[phase] || map.idle;
   setState(els.launchBar, ds);
   els.lbKey.textContent = t(kKey);
-  els.lbCn.textContent = phase === 'launched' ? `${t(kCn)} PID ${params.pid}` : t(kCn);
+  els.lbCn.textContent = t(kCn) + (phase === 'launched' && !cli && params.pid ? ` PID ${params.pid}` : '');
   els.lbTarget.textContent = kTarget ? t(kTarget) : (params.target || '');
 }
 
@@ -211,31 +225,113 @@ function renderProxy() {
 }
 
 function renderTarget() {
-  const tg = state.target;
+  const tg = cur().target;
+  const cli = state.tab === 'cli';
+  // The card's buttons follow the tab: each target picks its own binary.
+  els.btnChoose.hidden = cli;
+  els.btnChooseCli.hidden = !cli;
   if (!tg) { setState(els.ch02, 'idle'); els.ch02Value.textContent = t('ch02.searching'); return; }
   if (!tg.found) {
     setState(els.ch02, 'fail');
-    els.ch02Value.textContent = t('ch02.none');
-    els.ch02Meta.textContent = t('ch02.noneMeta');
+    els.ch02Value.textContent = cli ? t('ch02.cliNone') : t('ch02.none');
+    els.ch02Meta.textContent = cli ? t('ch02.cliNoneMeta') : t('ch02.noneMeta');
     return;
   }
   setState(els.ch02, 'ok');
   els.ch02Value.textContent = tg.path;
-  els.ch02Meta.textContent = t(tg.languageServer ? 'ch02.okMetaLs' : 'ch02.okMetaNoLs', { source: tg.source });
+  els.ch02Meta.textContent = cli
+    ? t('ch02.cliOkMeta', { source: tg.source })
+    : t(tg.languageServer ? 'ch02.okMetaLs' : 'ch02.okMetaNoLs', { source: tg.source });
 }
 
 function renderRunning() {
-  const list = state.running;
-  els.btnKill.hidden = !list.length;
+  const p = cur();
+  els.btnKill.hidden = true;
+  if (p.bar.phase === 'launching') {
+    setState(els.ch03, 'scan');
+    els.ch03Value.textContent = t('ch03.starting');
+    els.ch03Meta.textContent = '';
+    return;
+  }
+  // The CLI tab shows sessions as information: they live in the user's own
+  // terminals, so there is nothing stale to quit and nothing blocking launch.
+  if (state.tab === 'cli') {
+    const list = p.sessions || [];
+    setState(els.ch03, 'ok');
+    els.ch03Value.textContent = list.length
+      ? t('ch03.cliSessions', { n: list.length, pids: list.map(r => r.pid).join(', ') })
+      : t('ch03.cliClean');
+    els.ch03Meta.textContent = t('ch03.cliCleanMeta');
+    return;
+  }
+  const list = p.running;
   if (!list.length) {
     setState(els.ch03, 'ok');
     els.ch03Value.textContent = t('ch03.clean');
     els.ch03Meta.textContent = t('ch03.cleanMeta');
     return;
   }
+  // Started through this launcher, so it already carries the proxy env.
+  if (list.some(r => r.pid === p.launchedPid)) {
+    setState(els.ch03, 'ok');
+    els.ch03Value.textContent = t('ch03.launched', { pid: p.launchedPid });
+    els.ch03Meta.textContent = t('ch03.launchedMeta');
+    return;
+  }
   setState(els.ch03, 'fail');
+  els.btnKill.hidden = false;
   els.ch03Value.textContent = t('ch03.stale', { n: list.length, pids: list.map(r => r.pid).join(', ') });
   els.ch03Meta.textContent = t('ch03.staleMeta');
+}
+
+const epLabel = () => state.best ? `${url(state.best)} · ${state.best.kind}` : '';
+const readyBar = () => state.best
+  ? { phase: 'armed', params: { target: `:${state.best.port} ${state.best.kind}` } }
+  : { phase: 'noproxy', params: {} };
+function launchedBar(kind) {
+  return kind === 'desktop'
+    ? { phase: 'launched', params: { pid: state.profiles.desktop.launchedPid, target: epLabel() } }
+    : { phase: 'launched', params: { target: `${epLabel()} · ${t('launched.cli.dir')}` } };
+}
+
+// The launch bar follows what is actually up: a target that is running reads
+// as launched, and once it is gone the bar goes back to ready.
+function settleProfile(kind) {
+  const p = state.profiles[kind];
+  if (p.bar.phase === 'launching') return;
+  // For the CLI only the session this launcher opened counts: agy sessions
+  // the user starts in their own terminals say nothing about the launch bar.
+  const up = kind === 'cli' ? p.own.length > 0 : !!p.launchedPid;
+  if (up) { p.bar = launchedBar(kind); return; }
+  const blocked = kind === 'cli' ? false : p.running.length > 0;
+  if (p.bar.phase === 'launched' || (p.bar.phase === 'stale' && !blocked)) p.bar = readyBar();
+}
+
+// What is running changes without the user touching this window — they close
+// Antigravity, end an agy session — so CH03 is repainted from a fresh reading
+// of the process table rather than from what the launcher last started.
+function applyStatus(s, render = true) {
+  const d = state.profiles.desktop;
+  d.running = s.running || [];
+  d.launchedPid = s.launchedPid || null;
+  const c = state.profiles.cli;
+  c.sessions = s.sessions || [];
+  c.own = c.own.filter(pid => c.sessions.some(r => r.pid === pid));
+  settleProfile('desktop'); settleProfile('cli');
+  if (render) { renderRunning(); renderBar(); }
+}
+
+async function refreshStatus() {
+  if (statusBusy || state.probing) return;
+  statusBusy = true;
+  try { applyStatus(await window.launcher.status()); }
+  catch (e) { console.error('Status failed:', e); }
+  finally { statusBusy = false; }
+}
+
+function syncTargetSeg() {
+  els.targetSeg.querySelectorAll('[data-target]').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.target === state.tab)));
 }
 
 function renderTunnel() {
@@ -379,7 +475,7 @@ function renderAdaptiveButtons() {
 }
 
 function repaint() {
-  renderTunnel(); renderProxy(); renderTarget(); renderRunning(); renderBar(); renderEnv();
+  renderTunnel(); renderProxy(); renderTarget(); renderRunning(); syncTargetSeg(); renderBar(); renderEnv();
   renderAdaptiveButtons();
   applyWinState(winFlags);
   repaintLogs();
@@ -425,20 +521,22 @@ async function doDiagnose() {
 }
 
 async function doProbe() {
-  state.best = null; state.running = []; state.probing = true;
-  state.target = null;
+  state.best = null; state.probing = true;
+  for (const p of Object.values(state.profiles)) {
+    p.target = null; p.running = []; p.sessions = [];
+  }
   els.proxyForm.hidden = true;
   repaint();
   pushLog('sys', 'log.startProbe');
 
   const res = await window.launcher.probe();
   state.probing = false;
-  state.target = res.target;
-  state.running = res.running;
   state.best = res.proxyBest;
-  state.bar = state.best
-    ? { phase: 'armed', params: { target: `:${state.best.port} ${state.best.kind}` } }
-    : { phase: 'noproxy', params: {} };
+  // One endpoint arms both launch targets: the proxy scan is shared.
+  for (const p of Object.values(state.profiles)) if (p.bar.phase !== 'launching') p.bar = readyBar();
+  applyStatus(res, false);
+  state.profiles.desktop.target = res.target;
+  state.profiles.cli.target = res.cliTarget || null;
   repaint();
 
   // Trigger diagnostics after probing
@@ -460,14 +558,16 @@ window.launcher.onCandidate(c => {
 });
 
 function doLaunch() {
-  if (state.running.length) {
-    state.bar = { phase: 'stale', params: { target: t('err.blockedStale') } };
-    pushLog('err', 'err.blockedStale');
+  const cli = state.tab === 'cli';
+  const p = cur();
+  if (cli && p.target && !p.target.found) {
+    p.bar = { phase: 'failed', params: { target: t('err.blockedCli') } };
+    pushLog('err', 'err.blockedCli');
     renderBar();
     return;
   }
   if (!state.best) {
-    state.bar = { phase: 'noproxy', params: { target: t('err.blockedProxy') } };
+    p.bar = { phase: 'noproxy', params: { target: t('err.blockedProxy') } };
     pushLog('err', 'err.blockedProxy');
     renderBar();
     return;
@@ -476,27 +576,36 @@ function doLaunch() {
 }
 
 async function launchNow() {
-  state.bar = { phase: 'launching', params: { target: `:${state.best.port} ${state.best.kind}` } };
-  renderBar();
-  const r = await window.launcher.launch();
+  // The tab may be switched while the launch is in flight, so bind the
+  // profile now rather than reading cur() after the await.
+  const kind = state.tab;
+  const p = state.profiles[kind];
+  p.bar = { phase: 'launching', params: { target: `:${state.best.port} ${state.best.kind}` } };
+  renderBar(); renderRunning();
+  const r = await window.launcher.launch({ targetKind: kind });
   if (r.ok) {
-    state.bar = { phase: 'launched', params: { pid: r.pid, target: `${r.endpoint} · ${r.kind}` } };
-    renderBar();
+    if (r.cli) { p.sessions = r.sessions || p.sessions; p.own = r.own || []; }
+    else {
+      p.launchedPid = r.launchedPid || r.pid || null;
+      p.running = r.running || p.running;
+    }
+    p.bar = launchedBar(kind);
   } else if (r.needsQuit) {
-    state.running = r.running;
-    state.bar = { phase: 'stale', params: { target: t(r.errKey) } };
-    renderRunning();
+    p.running = r.running || [];
+    p.launchedPid = r.launchedPid || null;
+    // Already up through this launcher: nothing to quit, so just show it.
+    p.bar = p.launchedPid ? launchedBar(kind) : { phase: 'stale', params: { target: t(r.errKey) } };
   } else {
-    state.bar = { phase: 'failed', params: { target: t(r.errKey || 'err.noProxy') } };
+    p.bar = { phase: 'failed', params: { target: t(r.errKey || 'err.noProxy') } };
   }
-  renderBar();
+  renderRunning(); renderBar();
 }
 
 // The main process walks the launch in stages; the bar narrates each one.
 window.launcher.onLaunchStage(stage => {
   if (!state.best) return;
-  state.bar = { phase: 'launching', params: { target: stage === 'preflight' ? t('bar.preflight') : t('bar.spawning') } };
-  renderBar();
+  cur().bar = { phase: 'launching', params: { target: stage === 'preflight' ? t('bar.preflight') : t('bar.spawning') } };
+  renderBar(); renderRunning();
 });
 
 els.launchBar.addEventListener('click', doLaunch);
@@ -513,12 +622,26 @@ document.addEventListener('keydown', e => {
 $('btnRetarget').addEventListener('click', doProbe);
 $('btnChoose').addEventListener('click', async () => {
   const p = await window.launcher.chooseTarget();
-  if (p) { state.target = { found: true, path: p, source: 'manual', languageServer: null }; renderTarget(); }
+  if (p) { state.profiles.desktop.target = { found: true, path: p, source: 'manual', languageServer: null }; state.tab = 'desktop'; syncTargetSeg(); renderTarget(); }
 });
-els.btnKill.addEventListener('click', async () => {
-  state.running = (await window.launcher.quitInstances(state.running.map(r => r.pid))) || [];
-  renderRunning();
+$('btnChooseCli').addEventListener('click', async () => {
+  const p = await window.launcher.chooseCli();
+  if (p) {
+    state.profiles.cli.target = { found: true, path: p, source: 'manual', kind: 'cli' };
+    state.tab = 'cli'; syncTargetSeg(); renderTarget();
+  }
 });
+els.targetSeg.addEventListener('click', e => {
+  // Channels header tab: switching profiles must never launch anything.
+  const b = e.target.closest('[data-target]');
+  if (!b || b.dataset.target === state.tab) return;
+  state.tab = b.dataset.target;
+  syncTargetSeg();
+  renderTarget(); renderRunning(); renderBar();
+  // The other tab may have been left a while ago; read its state afresh.
+  refreshStatus();
+});
+els.btnKill.addEventListener('click', refreshStatus);
 
 els.btnToggleIp.addEventListener('click', () => {
   state.ipMasked = !state.ipMasked;
@@ -566,9 +689,13 @@ document.querySelectorAll('.winctl button').forEach(b =>
   els.revChip.textContent = `REV ${info.appVersion}`;
   if (info.config.proxyUrl) els.proxyInput.value = info.config.proxyUrl;
   els.preflightToggle.setAttribute('aria-checked', String(info.config.preflight !== false));
+  state.profiles.cli.target = info.cliTarget || null;
+  // Always opens on the desktop client; the tab is a per-session choice.
+  syncTargetSeg();
   renderAdaptiveButtons();
   pushLog('sys', 'log.ready');
   pushLog('sys', 'log.viewport', { w: innerWidth, h: innerHeight, dpr: devicePixelRatio, scrollW: document.documentElement.scrollWidth });
   if (info.platform === 'win32') pushLog('sys', 'log.whyGo');
+  setInterval(() => { if (!paused) refreshStatus(); }, 4000);
   doProbe();
 })();

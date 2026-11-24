@@ -123,12 +123,13 @@ body {
 }
 .chip.ghost { color: var(--ink-faint); }
 .seg { display: flex; border: 1px solid var(--line-strong); border-radius: 999px; overflow: hidden; background: var(--inset); }
-.seg button {
+.seg button, .seg span[role="button"] {
   border: 0; background: transparent; color: var(--ink-faint); cursor: pointer;
   font: 500 10px/1 var(--font-display); letter-spacing: .1em; padding: 6px 9px 5px; transition: .18s;
+  -webkit-app-region: no-drag; user-select: none;
 }
-.seg button:hover { color: var(--ink); }
-.seg button[aria-pressed="true"] { background: var(--amber); color: #12100c; }
+.seg button:hover, .seg span[role="button"]:hover { color: var(--ink); }
+.seg button[aria-pressed="true"], .seg span[role="button"][aria-pressed="true"] { background: var(--amber); color: #12100c; }
 .winctl { display: flex; gap: 6px; margin-left: 2px; }
 .winctl button {
   width: 24px; height: 22px; border: 1px solid var(--line-strong); border-radius: 7px;
@@ -195,7 +196,11 @@ code { font-family: var(--font-mono); font-size: 10px; color: var(--amber); }
 
 /* channels ----------------------------------------------------------------- */
 .channels { grid-area: chan; display: flex; flex-direction: column; gap: 9px; min-height: 0; }
-.channels > .etiquette { flex: 0 0 auto; margin-bottom: 2px; }
+.channels-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 0 0 auto; margin-bottom: 2px; }
+.channels-head .etiquette { margin-bottom: 0; flex: 1; }
+/* per-target tab: each tab keeps its own channels and its own launch state */
+.tab-seg { -webkit-app-region: no-drag; flex: 0 0 auto; }
+.tab-seg span[role="button"] { font-size: 9px; padding: 5px 11px 4px; }
 .channel {
   display: grid; grid-template-columns: 74px 14px minmax(0, 1fr) auto;
   align-items: center; gap: 14px; padding: 13px 17px; min-width: 0;
