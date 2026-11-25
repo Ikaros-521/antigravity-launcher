@@ -175,6 +175,7 @@ ipcMain.handle('probe', async () => {
   out.proxyBest = best.best;
   lastBestProxy = best.best;
   out.results = best.results;
+  out.noProxy = launch.NO_PROXY_VALUE;
   log(best.best ? 'ok' : 'err', best.best ? 'log.proxyOk' : 'log.proxyNone',
     best.best && {
       ep: launch.redact(best.best), kind: best.best.kind,

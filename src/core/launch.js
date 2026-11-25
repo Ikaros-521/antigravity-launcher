@@ -86,6 +86,18 @@ function redact(ep) {
   return ep && ep.user ? `${ep.scheme}://***:***@${ep.host}:${ep.port}` : `${ep.scheme}://${ep.host}:${ep.port}`;
 }
 
+// Loopback is the floor: Antigravity's UI and OAuth callback are local, and
+// proxying them white-screens the app. Destinations the host already bypasses
+// (LAN, WireGuard peers, internal domains) are kept too — otherwise they would
+// be handed to the proxy and fail. AGY_NO_PROXY overrides for a one-off run.
+// Loopback entries are always merged in, so a host list that omits them cannot
+// take the UI down with it.
+const LOOPBACK_NO_PROXY = ['localhost', '127.0.0.1', '::1'].join(',');
+const NO_PROXY_VALUE = Array.from(new Set(
+  [LOOPBACK_NO_PROXY, process.env.AGY_NO_PROXY || process.env.NO_PROXY || '']
+    .join(',').split(',').map(s => s.trim()).filter(Boolean),
+)).join(',');
+
 function buildEnv(ep) {
   const http = urlFor(ep, 'http');
   const socks = urlFor(ep, 'socks5');
@@ -93,8 +105,8 @@ function buildEnv(ep) {
     HTTP_PROXY: http, HTTPS_PROXY: http,
     http_proxy: http, https_proxy: http,
     ALL_PROXY: socks, all_proxy: socks,
-    NO_PROXY: 'localhost,127.0.0.1,::1',
-    no_proxy: 'localhost,127.0.0.1,::1',
+    NO_PROXY: NO_PROXY_VALUE,
+    no_proxy: NO_PROXY_VALUE,
   };
 }
 
@@ -109,19 +121,19 @@ function buildProxyCommands(ep) {
 
   // 1. Unix 通用 shell (bash/zsh) export 命令
   const shellExport = ep
-    ? `export HTTP_PROXY="${http}" && export HTTPS_PROXY="${http}" && export ALL_PROXY="${socks}" && export NO_PROXY="localhost,127.0.0.1,::1"`
+    ? `export HTTP_PROXY="${http}" && export HTTPS_PROXY="${http}" && export ALL_PROXY="${socks}" && export NO_PROXY="${NO_PROXY_VALUE}"`
     : '';
   const shellUnset = 'unset HTTP_PROXY HTTPS_PROXY ALL_PROXY NO_PROXY http_proxy https_proxy all_proxy no_proxy';
 
   // 2. Windows PowerShell 命令
   const powershell = ep
-    ? `$env:HTTP_PROXY="${http}"; $env:HTTPS_PROXY="${http}"; $env:ALL_PROXY="${socks}"; $env:NO_PROXY="localhost,127.0.0.1,::1"`
+    ? `$env:HTTP_PROXY="${http}"; $env:HTTPS_PROXY="${http}"; $env:ALL_PROXY="${socks}"; $env:NO_PROXY="${NO_PROXY_VALUE}"`
     : '';
   const powershellUnset = 'Remove-Item env:HTTP_PROXY, env:HTTPS_PROXY, env:ALL_PROXY, env:NO_PROXY -ErrorAction SilentlyContinue';
 
   // 3. Windows CMD 命令
   const cmd = ep
-    ? `set "HTTP_PROXY=${http}" && set "HTTPS_PROXY=${http}" && set "ALL_PROXY=${socks}" && set "NO_PROXY=localhost,127.0.0.1,::1"`
+    ? `set "HTTP_PROXY=${http}" && set "HTTPS_PROXY=${http}" && set "ALL_PROXY=${socks}" && set "NO_PROXY=${NO_PROXY_VALUE}"`
     : '';
   const cmdUnset = 'set "HTTP_PROXY=" && set "HTTPS_PROXY=" && set "ALL_PROXY=" && set "NO_PROXY="';
 
@@ -346,7 +358,7 @@ function openTerminal({ type = 'powershell', workDir, ep, runCommand }) {
       const socks = ep ? urlFor(ep, 'socks5') : '';
       const tail = runCommand ? ` && "${runCommand}"` : '';
       const cmdScript = ep
-        ? `cd /d "${validDir}" && set "HTTP_PROXY=${http}" && set "HTTPS_PROXY=${http}" && set "ALL_PROXY=${socks}" && set "NO_PROXY=localhost,127.0.0.1,::1" && echo [AGY] Proxy environment set -> ${http}${tail}`
+        ? `cd /d "${validDir}" && set "HTTP_PROXY=${http}" && set "HTTPS_PROXY=${http}" && set "ALL_PROXY=${socks}" && set "NO_PROXY=${NO_PROXY_VALUE}" && echo [AGY] Proxy environment set -> ${http}${tail}`
         : `cd /d "${validDir}" && echo [AGY] Terminal ready${tail}`;
       const child = spawn('cmd.exe', ['/c', 'start', '""', 'cmd.exe', '/K', cmdScript], {
         cwd: validDir,
@@ -363,7 +375,7 @@ function openTerminal({ type = 'powershell', workDir, ep, runCommand }) {
       const socks = ep ? urlFor(ep, 'socks5') : '';
       const tail = runCommand ? `; & '${runCommand}'` : '';
       const psScript = ep
-        ? `Set-Location '${validDir}'; $env:HTTP_PROXY='${http}'; $env:HTTPS_PROXY='${http}'; $env:ALL_PROXY='${socks}'; $env:NO_PROXY='localhost,127.0.0.1,::1'; Write-Host '[AGY] Proxy environment set -> ${http}' -ForegroundColor Cyan${tail}`
+        ? `Set-Location '${validDir}'; $env:HTTP_PROXY='${http}'; $env:HTTPS_PROXY='${http}'; $env:ALL_PROXY='${socks}'; $env:NO_PROXY='${NO_PROXY_VALUE}'; Write-Host '[AGY] Proxy environment set -> ${http}' -ForegroundColor Cyan${tail}`
         : `Set-Location '${validDir}'; Write-Host '[AGY] Terminal ready' -ForegroundColor Yellow${tail}`;
       const child = spawn('cmd.exe', ['/c', 'start', '""', 'powershell.exe', '-NoExit', '-Command', psScript], {
         cwd: validDir,
@@ -380,7 +392,7 @@ function openTerminal({ type = 'powershell', workDir, ep, runCommand }) {
     const http = ep ? urlFor(ep, 'http') : '';
     const socks = ep ? urlFor(ep, 'socks5') : '';
     const envExports = ep
-      ? `export HTTP_PROXY="${http}" && export HTTPS_PROXY="${http}" && export ALL_PROXY="${socks}" && export NO_PROXY="localhost,127.0.0.1,::1" && `
+      ? `export HTTP_PROXY="${http}" && export HTTPS_PROXY="${http}" && export ALL_PROXY="${socks}" && export NO_PROXY="${NO_PROXY_VALUE}" && `
       : '';
     const tail = runCommand ? ` && '${runCommand}'` : '';
     const script = `tell application "Terminal" to do script "cd '${validDir}' && ${envExports}echo '[AGY] Proxy environment set'${tail}"` ;
@@ -424,4 +436,5 @@ function launchCli(ep, cliPath, { type, workDir } = {}) {
 module.exports = {
   listProcesses, pickRunning, pickCliSessions, processStartEpoch,
   killInstances, buildEnv, buildProxyCommands, openTerminal, launchCli, launch, urlFor, redact, raiseWindow,
+  NO_PROXY_VALUE,
 };

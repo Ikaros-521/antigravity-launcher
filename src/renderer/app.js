@@ -398,10 +398,11 @@ function renderEnv() {
   const b = state.best;
   const http = b && `http://${b.host}:${b.port}`;
   const socks = b && `socks5://${b.host}:${b.port}`;
+  const noProxy = state.noProxy || 'localhost,127.0.0.1,::1';
   const rows = [
     ['HTTPS_PROXY', http], ['HTTP_PROXY', http], ['ALL_PROXY', socks],
     ['https_proxy', http], ['http_proxy', http], ['all_proxy', socks],
-    ['NO_PROXY', 'localhost,127.0.0.1,::1'], ['no_proxy', 'localhost,127.0.0.1,::1'],
+    ['NO_PROXY', noProxy], ['no_proxy', noProxy],
   ];
   els.envGrid.replaceChildren(...rows.map(([k, v]) => {
     const cell = document.createElement('div');
@@ -532,6 +533,7 @@ async function doProbe() {
   const res = await window.launcher.probe();
   state.probing = false;
   state.best = res.proxyBest;
+  state.noProxy = res.noProxy;
   // One endpoint arms both launch targets: the proxy scan is shared.
   for (const p of Object.values(state.profiles)) if (p.bar.phase !== 'launching') p.bar = readyBar();
   applyStatus(res, false);
