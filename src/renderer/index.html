@@ -20,6 +20,7 @@
     <div class="rail-right">
       <span class="chip" id="osChip">—</span>
       <span class="chip ghost" id="revChip">REV —</span>
+      <button type="button" class="chip chip-btn" id="btnAbout" data-i18n="about.btn">关于</button>
       <div class="seg" id="langSeg" role="group" aria-label="语言 / Language">
         <button type="button" data-lang="zh">中</button>
         <button type="button" data-lang="en">EN</button>
@@ -163,6 +164,53 @@
       <span class="foot-keys" data-i18n="footKeys">F11 全屏 · 双击标题栏最大化</span>
     </div>
   </aside>
+</div>
+
+<div class="modal-backdrop" id="aboutModal" hidden role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+  <div class="modal glass">
+    <div class="modal-head">
+      <div class="etiquette" id="aboutTitle">ABOUT<span class="cn" data-i18n="g.about">／ 关于</span></div>
+      <button type="button" class="btn ghost btn-sm" id="btnAboutClose" data-i18n-title="win.close" aria-label="close">×</button>
+    </div>
+    <div class="about-hero">
+      <div>
+        <div class="about-name">Antigravity Launcher <span class="about-ver mono" id="aboutVersion">v—</span></div>
+        <div class="about-desc" data-i18n="about.desc">给 Google Antigravity 桌面客户端与 agy CLI 用的进程级代理启动器</div>
+      </div>
+      <button type="button" class="btn-copy btn-action" data-external="https://github.com/Ikaros-521/antigravity-launcher" data-i18n="about.repo">GitHub 仓库</button>
+    </div>
+    <div class="about-section">
+      <div class="etiquette">RELATED PROJECTS<span class="cn" data-i18n="g.related">／ 相关项目推荐</span></div>
+      <div class="rec-list">
+        <div class="rec-card">
+          <div class="rec-main">
+            <div class="rec-title">
+              <b>google-qr-sms-helper</b>
+              <span class="rec-badge" data-i18n="about.recBadge">登录辅助</span>
+            </div>
+            <p class="rec-desc" data-i18n="about.qrDesc">Chrome 浏览器扩展：将 Google 账号登录/授权时的强制手机扫码验证一键降级为传统短信验证码，与本启动器共同解决登录和使用反重力时的卡点。</p>
+            <span class="rec-url mono">github.com/havenicec/google-qr-sms-helper</span>
+          </div>
+          <button type="button" class="btn-copy btn-action" data-external="https://github.com/havenicec/google-qr-sms-helper" data-i18n="about.visit">前往仓库</button>
+        </div>
+        <div class="rec-card subtle">
+          <div class="rec-main">
+            <div class="rec-title">
+              <b>antigravity-proxy-launcher</b>
+              <span class="rec-badge" data-i18n="about.ackBadge">思路来源</span>
+            </div>
+            <p class="rec-desc" data-i18n="about.ackDesc">本工具的进程级代理注入思路来自该 MIT 开源项目。</p>
+            <span class="rec-url mono">github.com/peroperoyui-lab/antigravity-proxy-launcher</span>
+          </div>
+          <button type="button" class="btn-copy" data-external="https://github.com/peroperoyui-lab/antigravity-proxy-launcher" data-i18n="about.visit">前往仓库</button>
+        </div>
+      </div>
+    </div>
+    <div class="about-foot mono">
+      <span>MIT License</span>
+      <span data-i18n="foot2">不开 TUN · 不改系统代理</span>
+    </div>
+  </div>
 </div>
 
 <script src="i18n.js"></script>

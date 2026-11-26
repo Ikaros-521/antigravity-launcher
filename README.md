@@ -118,6 +118,12 @@ npm run icons
 
 进程级注入这个思路来自 [peroperoyui-lab/antigravity-proxy-launcher](https://github.com/peroperoyui-lab/antigravity-proxy-launcher)（MIT）。本仓库是独立的 Electron 图形界面实现，不含该项目的脚本代码，并在探测上做了扩展：真实握手校验取代端口连通性探测、双目标分别验证、macOS/Linux 支持。
 
+## 相关项目推荐 / Related Projects
+
+以下项目同样用于帮助用户顺利登录并使用 Google Antigravity（反重力）：
+
+- **[havenicec/google-qr-sms-helper](https://github.com/havenicec/google-qr-sms-helper)** — Chrome 浏览器扩展（Manifest V3），用于将 Google 账号登录/授权时强制弹出的手机扫码验证一键降级为传统短信验证码，解决登录与使用反重力过程中的验证卡点，建议与本代理启动器搭配使用。
+
 ## License
 
 MIT

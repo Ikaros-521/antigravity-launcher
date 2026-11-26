@@ -23,6 +23,7 @@ const els = {
   preflightToggle: $('preflightToggle'),
   consoleBody: $('consoleBody'), envGrid: $('envGrid'),
   plateCn: $('plateCn'), btnMax: $('btnMax'), btnFull: $('btnFull'),
+  btnAbout: $('btnAbout'), aboutModal: $('aboutModal'), btnAboutClose: $('btnAboutClose'), aboutVersion: $('aboutVersion'),
 };
 
 let appName = { en: 'Antigravity Launcher', zh: '反重力代理启动器' };
@@ -618,8 +619,15 @@ els.preflightToggle.addEventListener('click', async e => {
   await window.launcher.setPreflight(next);
 });
 document.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && document.activeElement === document.body) doLaunch();
+  if (e.key === 'Escape' && !els.aboutModal.hidden) { els.aboutModal.hidden = true; return; }
+  if (e.key === 'Enter' && els.aboutModal.hidden && document.activeElement === document.body) doLaunch();
 });
+
+els.btnAbout.addEventListener('click', () => { els.aboutModal.hidden = false; });
+els.btnAboutClose.addEventListener('click', () => { els.aboutModal.hidden = true; });
+els.aboutModal.addEventListener('click', e => { if (e.target === els.aboutModal) els.aboutModal.hidden = true; });
+els.aboutModal.querySelectorAll('[data-external]').forEach(btn =>
+  btn.addEventListener('click', () => window.launcher.openExternal(btn.dataset.external)));
 
 $('btnRetarget').addEventListener('click', doProbe);
 $('btnChoose').addEventListener('click', async () => {
@@ -689,6 +697,7 @@ document.querySelectorAll('.winctl button').forEach(b =>
   applyWinState(info.state || winFlags);
   els.osChip.textContent = OS_LABEL[info.platform] || info.platform.toUpperCase();
   els.revChip.textContent = `REV ${info.appVersion}`;
+  els.aboutVersion.textContent = `v${info.appVersion}`;
   if (info.config.proxyUrl) els.proxyInput.value = info.config.proxyUrl;
   els.preflightToggle.setAttribute('aria-checked', String(info.config.preflight !== false));
   state.profiles.cli.target = info.cliTarget || null;
